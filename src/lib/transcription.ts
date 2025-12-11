@@ -176,6 +176,75 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
 
 // Step C: Re-indexing (handled during SRT generation)
 
+const MAX_LINE_LENGTH = 80;
+
+// Split text into chunks respecting word boundaries and max length
+function splitTextIntoChunks(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) {
+    return [text];
+  }
+  
+  const words = text.split(' ');
+  const chunks: string[] = [];
+  let currentChunk = '';
+  
+  for (const word of words) {
+    const testChunk = currentChunk ? `${currentChunk} ${word}` : word;
+    
+    if (testChunk.length <= maxLength) {
+      currentChunk = testChunk;
+    } else {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+      }
+      // Handle words longer than maxLength
+      if (word.length > maxLength) {
+        let remaining = word;
+        while (remaining.length > maxLength) {
+          chunks.push(remaining.slice(0, maxLength));
+          remaining = remaining.slice(maxLength);
+        }
+        currentChunk = remaining;
+      } else {
+        currentChunk = word;
+      }
+    }
+  }
+  
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+  
+  return chunks;
+}
+
+// Split segments that exceed 80 characters with proportional timestamps
+function splitLongSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
+  const result: TranscriptSegment[] = [];
+  
+  for (const segment of segments) {
+    const chunks = splitTextIntoChunks(segment.text, MAX_LINE_LENGTH);
+    
+    if (chunks.length === 1) {
+      result.push(segment);
+    } else {
+      // Split timestamp proportionally across chunks
+      const totalDuration = segment.endTime - segment.startTime;
+      const durationPerChunk = totalDuration / chunks.length;
+      
+      chunks.forEach((chunk, i) => {
+        result.push({
+          startTime: segment.startTime + (i * durationPerChunk),
+          endTime: segment.startTime + ((i + 1) * durationPerChunk),
+          text: chunk
+        });
+      });
+    }
+  }
+  
+  return result;
+}
+
 // Generate SRT content
 export function generateSRT(segments: TranscriptSegment[]): string {
   const formatTime = (seconds: number): string => {
@@ -187,9 +256,12 @@ export function generateSRT(segments: TranscriptSegment[]): string {
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
   };
   
+  // Apply 80-character line limit splitting
+  const splitSegments = splitLongSegments(segments);
+  
   const lines: string[] = [];
   
-  segments.forEach((segment, index) => {
+  splitSegments.forEach((segment, index) => {
     // Re-indexed numbering (Step C)
     lines.push(String(index + 1));
     lines.push(`${formatTime(segment.startTime)} --> ${formatTime(segment.endTime)}`);
