@@ -49,6 +49,92 @@ export async function initializeTranscriber(
   }
 }
 
+// Add inaudible noise to prevent silence detection
+// Noise amplitude is ~0.001 (-60dB), imperceptible to human ears
+async function addInaudibleNoise(audioBuffer: ArrayBuffer): Promise<Blob> {
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  
+  try {
+    const decodedAudio = await audioContext.decodeAudioData(audioBuffer.slice(0));
+    const numberOfChannels = decodedAudio.numberOfChannels;
+    const sampleRate = decodedAudio.sampleRate;
+    const length = decodedAudio.length;
+    
+    // Create offline context for processing
+    const offlineContext = new OfflineAudioContext(numberOfChannels, length, sampleRate);
+    
+    // Copy and add noise to each channel
+    const outputBuffer = offlineContext.createBuffer(numberOfChannels, length, sampleRate);
+    
+    for (let channel = 0; channel < numberOfChannels; channel++) {
+      const inputData = decodedAudio.getChannelData(channel);
+      const outputData = outputBuffer.getChannelData(channel);
+      
+      for (let i = 0; i < length; i++) {
+        // Add very low amplitude noise (-60dB, ~0.001 amplitude)
+        const noise = (Math.random() * 2 - 1) * 0.001;
+        outputData[i] = inputData[i] + noise;
+      }
+    }
+    
+    // Encode to WAV
+    return encodeWAV(outputBuffer);
+  } finally {
+    await audioContext.close();
+  }
+}
+
+// Encode AudioBuffer to WAV Blob
+function encodeWAV(audioBuffer: AudioBuffer): Blob {
+  const numberOfChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const length = audioBuffer.length;
+  
+  // Interleave channels
+  const interleaved = new Float32Array(length * numberOfChannels);
+  for (let channel = 0; channel < numberOfChannels; channel++) {
+    const channelData = audioBuffer.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      interleaved[i * numberOfChannels + channel] = channelData[i];
+    }
+  }
+  
+  // Convert to 16-bit PCM
+  const buffer = new ArrayBuffer(44 + interleaved.length * 2);
+  const view = new DataView(buffer);
+  
+  // WAV header
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+  
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + interleaved.length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // Subchunk1Size
+  view.setUint16(20, 1, true); // AudioFormat (PCM)
+  view.setUint16(22, numberOfChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numberOfChannels * 2, true); // ByteRate
+  view.setUint16(32, numberOfChannels * 2, true); // BlockAlign
+  view.setUint16(34, 16, true); // BitsPerSample
+  writeString(36, 'data');
+  view.setUint32(40, interleaved.length * 2, true);
+  
+  // Write samples
+  let offset = 44;
+  for (let i = 0; i < interleaved.length; i++) {
+    const sample = Math.max(-1, Math.min(1, interleaved[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+    offset += 2;
+  }
+  
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
 export async function transcribeAudio(
   audioFile: File,
   onProgress?: (progress: TranscriptionProgress) => void
@@ -59,22 +145,31 @@ export async function transcribeAudio(
   
   onProgress?.({ status: 'transcribing', progress: 0, message: 'Processing audio...' });
   
-  // Convert file to ArrayBuffer first for better compatibility
+  // Convert file to ArrayBuffer
   const arrayBuffer = await audioFile.arrayBuffer();
   
-  // Validate file has content
   if (arrayBuffer.byteLength === 0) {
     throw new Error('Audio file is empty');
   }
   
   console.log(`Processing file: ${audioFile.name}, size: ${arrayBuffer.byteLength} bytes, type: ${audioFile.type}`);
   
-  // Create blob URL from the buffer
-  const blob = new Blob([arrayBuffer], { type: audioFile.type || 'audio/wav' });
-  const audioUrl = URL.createObjectURL(blob);
+  onProgress?.({ status: 'transcribing', progress: 5, message: 'Adding noise floor...' });
+  
+  // Add inaudible noise to prevent silence detection
+  let processedBlob: Blob;
+  try {
+    processedBlob = await addInaudibleNoise(arrayBuffer);
+    console.log('Added inaudible noise floor to audio');
+  } catch (noiseError) {
+    console.warn('Could not add noise, using original audio:', noiseError);
+    processedBlob = new Blob([arrayBuffer], { type: audioFile.type || 'audio/wav' });
+  }
+  
+  const audioUrl = URL.createObjectURL(processedBlob);
   
   try {
-    onProgress?.({ status: 'transcribing', progress: 10, message: 'Decoding audio...' });
+    onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
     const result = await transcriber!(audioUrl, {
       return_timestamps: true,
@@ -86,7 +181,6 @@ export async function transcribeAudio(
     
     onProgress?.({ status: 'processing', progress: 80, message: 'Processing transcription...' });
     
-    // Convert to our segment format
     const segments: TranscriptSegment[] = [];
     
     if (result.chunks && Array.isArray(result.chunks)) {
@@ -101,10 +195,9 @@ export async function transcribeAudio(
         }
       }
     } else if (result.text) {
-      // Fallback: if no chunks, create a single segment
       segments.push({
         startTime: 0,
-        endTime: 30, // Approximate
+        endTime: 30,
         text: result.text.trim()
       });
     }
@@ -126,13 +219,46 @@ export async function transcribeAudio(
 
 // Step B: Sanitization Layer
 export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
+  // Comprehensive silence patterns - catches all known variants
   const silencePatterns = [
-    /^\s*\[silence\]\s*$/i,
-    /^\s*\(silence\)\s*$/i,
-    /^\s*\[blank_audio\]\s*$/i,
-    /^\s*\(blank_audio\)\s*$/i,
-    /^\s*\[blank audio\]\s*$/i,
-    /^\s*\(blank audio\)\s*$/i,
+    /^\s*\[silence\.?\]\s*$/i,
+    /^\s*\(silence\.?\)\s*$/i,
+    /^\s*\[blank_audio\.?\]\s*$/i,
+    /^\s*\(blank_audio\.?\)\s*$/i,
+    /^\s*\[blank audio\.?\]\s*$/i,
+    /^\s*\(blank audio\.?\)\s*$/i,
+    /^\s*\[inaudible\.?\]\s*$/i,
+    /^\s*\(inaudible\.?\)\s*$/i,
+    /^\s*\[music\.?\]\s*$/i,
+    /^\s*\(music\.?\)\s*$/i,
+    /^\s*\[noise\.?\]\s*$/i,
+    /^\s*\(noise\.?\)\s*$/i,
+    /^\s*\[applause\.?\]\s*$/i,
+    /^\s*\(applause\.?\)\s*$/i,
+    /^\s*\[laughter\.?\]\s*$/i,
+    /^\s*\(laughter\.?\)\s*$/i,
+    /^\s*\.\s*$/,  // Just a period
+    /^\s*$/,  // Empty or whitespace only
+  ];
+  
+  // Patterns to clean from mixed content
+  const cleanPatterns = [
+    /\[silence\.?\]/gi,
+    /\(silence\.?\)/gi,
+    /\[blank_audio\.?\]/gi,
+    /\(blank_audio\.?\)/gi,
+    /\[blank audio\.?\]/gi,
+    /\(blank audio\.?\)/gi,
+    /\[inaudible\.?\]/gi,
+    /\(inaudible\.?\)/gi,
+    /\[music\.?\]/gi,
+    /\(music\.?\)/gi,
+    /\[noise\.?\]/gi,
+    /\(noise\.?\)/gi,
+    /\[applause\.?\]/gi,
+    /\(applause\.?\)/gi,
+    /\[laughter\.?\]/gi,
+    /\(laughter\.?\)/gi,
   ];
   
   const isSilenceOnly = (text: string): boolean => {
@@ -141,12 +267,11 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
   
   const cleanMixedContent = (text: string): string => {
     let cleaned = text;
-    cleaned = cleaned.replace(/\[silence\]/gi, '').trim();
-    cleaned = cleaned.replace(/\(silence\)/gi, '').trim();
-    cleaned = cleaned.replace(/\[blank_audio\]/gi, '').trim();
-    cleaned = cleaned.replace(/\(blank_audio\)/gi, '').trim();
-    cleaned = cleaned.replace(/\[blank audio\]/gi, '').trim();
-    cleaned = cleaned.replace(/\(blank audio\)/gi, '').trim();
+    for (const pattern of cleanPatterns) {
+      cleaned = cleaned.replace(pattern, '').trim();
+    }
+    // Clean up multiple spaces
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
     return cleaned;
   };
   
