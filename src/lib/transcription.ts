@@ -25,7 +25,7 @@ export async function initializeTranscriber(
   onProgress?.({ status: 'loading', progress: 0, message: 'Loading speech recognition model...' });
   
   try {
-    transcriber = await pipeline(
+    const result = await pipeline(
       "automatic-speech-recognition",
       "onnx-community/whisper-tiny.en",
       {
@@ -40,6 +40,15 @@ export async function initializeTranscriber(
         }
       }
     );
+    
+    // Validate that we got a callable function
+    if (typeof result !== 'function') {
+      console.error('Pipeline returned non-function:', typeof result, result);
+      throw new Error('Model failed to initialize properly');
+    }
+    
+    transcriber = result;
+    console.log('Transcriber initialized successfully:', typeof transcriber);
     onProgress?.({ status: 'loading', progress: 100, message: 'Model loaded successfully' });
   } catch (error) {
     console.error('Failed to load transcriber:', error);
@@ -139,8 +148,14 @@ export async function transcribeAudio(
   audioFile: File,
   onProgress?: (progress: TranscriptionProgress) => void
 ): Promise<TranscriptSegment[]> {
-  if (!transcriber) {
+  // Ensure transcriber is initialized and valid
+  if (!transcriber || typeof transcriber !== 'function') {
+    transcriber = null; // Reset if invalid
     await initializeTranscriber(onProgress);
+  }
+  
+  if (typeof transcriber !== 'function') {
+    throw new Error('Failed to initialize transcription model');
   }
   
   onProgress?.({ status: 'transcribing', progress: 0, message: 'Processing audio...' });
