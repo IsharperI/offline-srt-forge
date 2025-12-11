@@ -1,4 +1,4 @@
-import { FileAudio, Download, Check } from 'lucide-react';
+import { FileAudio, Download, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatDuration } from '@/lib/transcription';
@@ -7,9 +7,10 @@ interface ProcessedFileProps {
   filename: string;
   duration: number;
   onDownload: () => void;
+  onRemove: () => void;
 }
 
-export function ProcessedFile({ filename, duration, onDownload }: ProcessedFileProps) {
+export function ProcessedFile({ filename, duration, onDownload, onRemove }: ProcessedFileProps) {
   return (
     <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 animate-slide-up">
       <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center flex-shrink-0">
@@ -37,6 +38,15 @@ export function ProcessedFile({ filename, duration, onDownload }: ProcessedFileP
       >
         <Download className="w-4 h-4" />
         Download SRT
+      </Button>
+      
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={onRemove}
+        className="flex-shrink-0 text-muted-foreground hover:text-destructive"
+      >
+        <X className="w-4 h-4" />
       </Button>
     </div>
   );
