@@ -92,10 +92,27 @@ const Index = () => {
       ]);
     } catch (error) {
       console.error('Transcription error:', error);
+      
+      // Generate a helpful error message
+      let errorMessage = 'Transcription failed';
+      if (error instanceof Error) {
+        if (error.message.includes('empty')) {
+          errorMessage = 'Audio file is empty or corrupted';
+        } else if (error.message.includes('decode') || error.message.includes('audio')) {
+          errorMessage = 'Unable to decode audio - format may be unsupported';
+        } else if (error.message.includes('memory') || error.message.includes('OOM')) {
+          errorMessage = 'File too large - try a shorter audio clip';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          errorMessage = 'Model loading failed - check your connection';
+        } else {
+          errorMessage = `Error: ${error.message.slice(0, 50)}`;
+        }
+      }
+      
       setProcessingFiles(prev =>
         prev.map(f =>
           f.id === fileId
-            ? { ...f, progress: { status: 'error', progress: 0, message: 'Transcription failed' } }
+            ? { ...f, progress: { status: 'error', progress: 0, message: errorMessage } }
             : f
         )
       );
@@ -110,6 +127,14 @@ const Index = () => {
 
   const handleDownload = (file: ProcessedFileData) => {
     downloadSRT(file.srtContent, file.filename);
+  };
+
+  const handleRemoveProcessing = (fileId: string) => {
+    setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  const handleRemoveCompleted = (fileId: string) => {
+    setCompletedFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
   const isProcessing = processingFiles.length > 0;
@@ -173,6 +198,7 @@ const Index = () => {
                 key={file.id}
                 filename={file.filename}
                 progress={file.progress}
+                onRemove={() => handleRemoveProcessing(file.id)}
               />
             ))}
           </div>
@@ -190,6 +216,7 @@ const Index = () => {
                 filename={file.filename}
                 duration={file.duration}
                 onDownload={() => handleDownload(file)}
+                onRemove={() => handleRemoveCompleted(file.id)}
               />
             ))}
           </div>
