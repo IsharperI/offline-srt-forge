@@ -79,8 +79,8 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
-      // Step C: Generate SRT (with re-indexing)
-      const srtContent = generateSRT(cleanedSegments);
+      // Step C: Generate SRT (with re-indexing and duration clamping)
+      const srtContent = generateSRT(cleanedSegments, duration);
 
       // Remove from processing, add to completed
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));

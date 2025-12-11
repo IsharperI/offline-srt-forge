@@ -407,8 +407,20 @@ function splitLongSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
   return result;
 }
 
+// Clamp segments to audio duration
+function clampSegmentsToDuration(segments: TranscriptSegment[], maxDuration: number): TranscriptSegment[] {
+  return segments
+    .filter(segment => segment.startTime < maxDuration) // Remove segments that start after audio ends
+    .map(segment => ({
+      ...segment,
+      startTime: Math.min(segment.startTime, maxDuration),
+      endTime: Math.min(segment.endTime, maxDuration),
+    }))
+    .filter(segment => segment.endTime > segment.startTime); // Remove zero-duration segments
+}
+
 // Generate SRT content
-export function generateSRT(segments: TranscriptSegment[]): string {
+export function generateSRT(segments: TranscriptSegment[], audioDuration?: number): string {
   const formatTime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -419,11 +431,16 @@ export function generateSRT(segments: TranscriptSegment[]): string {
   };
   
   // Apply 80-character line limit splitting
-  const splitSegments = splitLongSegments(segments);
+  let processedSegments = splitLongSegments(segments);
+  
+  // Clamp to audio duration if provided
+  if (audioDuration !== undefined && audioDuration > 0) {
+    processedSegments = clampSegmentsToDuration(processedSegments, audioDuration);
+  }
   
   const lines: string[] = [];
   
-  splitSegments.forEach((segment, index) => {
+  processedSegments.forEach((segment, index) => {
     // Re-indexed numbering (Step C)
     lines.push(String(index + 1));
     lines.push(`${formatTime(segment.startTime)} --> ${formatTime(segment.endTime)}`);
