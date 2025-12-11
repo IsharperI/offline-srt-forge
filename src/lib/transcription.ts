@@ -59,15 +59,30 @@ export async function transcribeAudio(
   
   onProgress?.({ status: 'transcribing', progress: 0, message: 'Processing audio...' });
   
-  // Convert file to audio URL
-  const audioUrl = URL.createObjectURL(audioFile);
+  // Convert file to ArrayBuffer first for better compatibility
+  const arrayBuffer = await audioFile.arrayBuffer();
+  
+  // Validate file has content
+  if (arrayBuffer.byteLength === 0) {
+    throw new Error('Audio file is empty');
+  }
+  
+  console.log(`Processing file: ${audioFile.name}, size: ${arrayBuffer.byteLength} bytes, type: ${audioFile.type}`);
+  
+  // Create blob URL from the buffer
+  const blob = new Blob([arrayBuffer], { type: audioFile.type || 'audio/wav' });
+  const audioUrl = URL.createObjectURL(blob);
   
   try {
+    onProgress?.({ status: 'transcribing', progress: 10, message: 'Decoding audio...' });
+    
     const result = await transcriber!(audioUrl, {
       return_timestamps: true,
       chunk_length_s: 30,
       stride_length_s: 5,
     }) as AutomaticSpeechRecognitionOutput;
+    
+    console.log('Transcription result:', result);
     
     onProgress?.({ status: 'processing', progress: 80, message: 'Processing transcription...' });
     
@@ -94,9 +109,16 @@ export async function transcribeAudio(
       });
     }
     
+    if (segments.length === 0) {
+      console.warn('No segments extracted from transcription result');
+    }
+    
     onProgress?.({ status: 'complete', progress: 100, message: 'Transcription complete' });
     
     return segments;
+  } catch (error) {
+    console.error('Transcription error details:', error);
+    throw error;
   } finally {
     URL.revokeObjectURL(audioUrl);
   }
