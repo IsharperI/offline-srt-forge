@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { AudioWaveform, Shield, Zap } from 'lucide-react';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
@@ -11,7 +11,6 @@ import {
   downloadSRT,
   getAudioDuration,
   TranscriptionProgress,
-  TranscriptSegment,
 } from '@/lib/transcription';
 
 interface ProcessedFileData {
@@ -27,6 +26,11 @@ interface ProcessingFile {
   progress: TranscriptionProgress;
 }
 
+interface QueuedFile {
+  id: string;
+  file: File;
+}
+
 const Index = () => {
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [modelProgress, setModelProgress] = useState<TranscriptionProgress>({
@@ -36,19 +40,18 @@ const Index = () => {
   });
   const [processingFiles, setProcessingFiles] = useState<ProcessingFile[]>([]);
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
+  
+  // Queue for sequential processing
+  const fileQueueRef = useRef<QueuedFile[]>([]);
+  const isProcessingRef = useRef(false);
 
-  const processFile = async (file: File) => {
-    const fileId = `${file.name}-${Date.now()}`;
-    
-    // Add to processing list
-    setProcessingFiles(prev => [
-      ...prev,
-      {
-        id: fileId,
-        filename: file.name,
-        progress: { status: 'loading', progress: 0, message: 'Starting...' },
-      },
-    ]);
+  const processNextInQueue = useCallback(async () => {
+    if (isProcessingRef.current || fileQueueRef.current.length === 0) {
+      return;
+    }
+
+    isProcessingRef.current = true;
+    const { id: fileId, file } = fileQueueRef.current[0];
 
     try {
       // Get duration
@@ -56,7 +59,7 @@ const Index = () => {
 
       // Transcribe with progress updates
       const updateProgress = (progress: TranscriptionProgress) => {
-        if (progress.status === 'loading' && !isModelLoading) {
+        if (progress.status === 'loading') {
           setIsModelLoading(true);
           setModelProgress(progress);
         }
@@ -117,13 +120,44 @@ const Index = () => {
         )
       );
     }
-  };
+
+    // Remove from queue and process next
+    fileQueueRef.current = fileQueueRef.current.slice(1);
+    isProcessingRef.current = false;
+    
+    // Process next file if any
+    if (fileQueueRef.current.length > 0) {
+      processNextInQueue();
+    }
+  }, []);
 
   const handleFilesSelected = useCallback((files: File[]) => {
-    files.forEach(file => {
-      processFile(file);
-    });
-  }, []);
+    // Add all files to the queue and processing list
+    const newQueuedFiles: QueuedFile[] = files.map(file => ({
+      id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+    }));
+
+    // Add to processing list with "Queued" status
+    setProcessingFiles(prev => [
+      ...prev,
+      ...newQueuedFiles.map((qf, index) => ({
+        id: qf.id,
+        filename: qf.file.name,
+        progress: {
+          status: 'loading' as const,
+          progress: 0,
+          message: index === 0 && !isProcessingRef.current ? 'Starting...' : 'Queued...',
+        },
+      })),
+    ]);
+
+    // Add to queue
+    fileQueueRef.current = [...fileQueueRef.current, ...newQueuedFiles];
+
+    // Start processing if not already
+    processNextInQueue();
+  }, [processNextInQueue]);
 
   const handleDownload = (file: ProcessedFileData) => {
     downloadSRT(file.srtContent, file.filename);
