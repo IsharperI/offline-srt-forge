@@ -1,9 +1,11 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { AudioWaveform, Shield, Zap } from 'lucide-react';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
 import { ProcessedFile } from '@/components/ProcessedFile';
 import { ModelLoader } from '@/components/ModelLoader';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import {
   transcribeAudio,
   sanitizeSegments,
@@ -40,6 +42,7 @@ const Index = () => {
   });
   const [processingFiles, setProcessingFiles] = useState<ProcessingFile[]>([]);
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
+  const [maxCharLimit, setMaxCharLimit] = useState(80);
   
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
@@ -79,8 +82,8 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
-      // Step C: Generate SRT (with re-indexing and duration clamping)
-      const srtContent = generateSRT(cleanedSegments, duration);
+      // Step C: Generate SRT (with re-indexing, duration clamping, and char limit)
+      const srtContent = generateSRT(cleanedSegments, duration, maxCharLimit);
 
       // Remove from processing, add to completed
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
@@ -129,7 +132,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, []);
+  }, [maxCharLimit]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -208,6 +211,30 @@ const Index = () => {
         {isModelLoading && (
           <div className="mb-6">
             <ModelLoader progress={modelProgress} />
+          </div>
+        )}
+
+        {/* Character Limit Setting */}
+        {!isModelLoading && (
+          <div className="mb-4 p-4 rounded-lg bg-secondary/50 border border-border">
+            <div className="flex items-center gap-4">
+              <Label htmlFor="charLimit" className="text-sm font-medium text-foreground whitespace-nowrap">
+                Max characters per caption:
+              </Label>
+              <Input
+                id="charLimit"
+                type="number"
+                min={20}
+                max={200}
+                value={maxCharLimit}
+                onChange={(e) => setMaxCharLimit(Math.max(20, Math.min(200, parseInt(e.target.value) || 80)))}
+                className="w-24"
+                disabled={isProcessing}
+              />
+              <span className="text-xs text-muted-foreground">
+                (20-200)
+              </span>
+            </div>
           </div>
         )}
 

@@ -338,7 +338,7 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
 
 // Step C: Re-indexing (handled during SRT generation)
 
-const MAX_LINE_LENGTH = 80;
+const DEFAULT_MAX_LINE_LENGTH = 80;
 
 // Split text into chunks respecting word boundaries and max length
 function splitTextIntoChunks(text: string, maxLength: number): string[] {
@@ -380,12 +380,12 @@ function splitTextIntoChunks(text: string, maxLength: number): string[] {
   return chunks;
 }
 
-// Split segments that exceed 80 characters with proportional timestamps
-function splitLongSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
+// Split segments that exceed max characters with proportional timestamps
+function splitLongSegments(segments: TranscriptSegment[], maxLineLength: number): TranscriptSegment[] {
   const result: TranscriptSegment[] = [];
   
   for (const segment of segments) {
-    const chunks = splitTextIntoChunks(segment.text, MAX_LINE_LENGTH);
+    const chunks = splitTextIntoChunks(segment.text, maxLineLength);
     
     if (chunks.length === 1) {
       result.push(segment);
@@ -420,7 +420,7 @@ function clampSegmentsToDuration(segments: TranscriptSegment[], maxDuration: num
 }
 
 // Generate SRT content
-export function generateSRT(segments: TranscriptSegment[], audioDuration?: number): string {
+export function generateSRT(segments: TranscriptSegment[], audioDuration?: number, maxLineLength: number = DEFAULT_MAX_LINE_LENGTH): string {
   const formatTime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -430,8 +430,8 @@ export function generateSRT(segments: TranscriptSegment[], audioDuration?: numbe
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
   };
   
-  // Apply 80-character line limit splitting
-  let processedSegments = splitLongSegments(segments);
+  // Apply character line limit splitting
+  let processedSegments = splitLongSegments(segments, maxLineLength);
   
   // Clamp to audio duration if provided
   if (audioDuration !== undefined && audioDuration > 0) {
