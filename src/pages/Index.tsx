@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
-import { AudioWaveform, Shield, Zap } from 'lucide-react';
+import { AudioWaveform, Shield, Zap, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
 import { ProcessedFile } from '@/components/ProcessedFile';
@@ -166,6 +167,15 @@ const Index = () => {
     downloadSRT(file.srtContent, file.filename);
   };
 
+  const handleExportAll = () => {
+    completedFiles.forEach((file, index) => {
+      // Stagger downloads slightly to prevent browser blocking
+      setTimeout(() => {
+        downloadSRT(file.srtContent, file.filename);
+      }, index * 100);
+    });
+  };
+
   const handleRemoveProcessing = (fileId: string) => {
     setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
   };
@@ -268,9 +278,22 @@ const Index = () => {
         {/* Completed Files */}
         {completedFiles.length > 0 && (
           <div className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-              Ready to Download
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                Ready to Download
+              </h2>
+              {completedFiles.length > 1 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportAll}
+                  className="gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Export All ({completedFiles.length})
+                </Button>
+              )}
+            </div>
             {completedFiles.map(file => (
               <ProcessedFile
                 key={file.id}
