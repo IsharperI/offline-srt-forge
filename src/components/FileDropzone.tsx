@@ -7,8 +7,8 @@ interface FileDropzoneProps {
   disabled?: boolean;
 }
 
-const ACCEPTED_TYPES = ['audio/mpeg', 'audio/wav', 'audio/x-m4a', 'audio/mp4', 'audio/m4a'];
-const ACCEPTED_EXTENSIONS = ['.mp3', '.wav', '.m4a'];
+const ACCEPTED_TYPES = ['audio/mpeg', 'audio/wav', 'audio/x-m4a', 'audio/mp4', 'audio/m4a', 'video/mp4'];
+const ACCEPTED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.mp4'];
 
 export function FileDropzone({ onFilesSelected, disabled }: FileDropzoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
@@ -95,15 +95,15 @@ export function FileDropzone({ onFilesSelected, disabled }: FileDropzoneProps) {
       
       <div className="text-center">
         <p className="text-lg font-medium text-foreground">
-          {isDragActive ? 'Drop your files here' : 'Drag audio files here or click to upload'}
+          {isDragActive ? 'Drop your files here' : 'Drag audio or video files here or click to upload'}
         </p>
         <p className="text-sm text-muted-foreground mt-1">
-          Supports MP3, WAV, and M4A files
+          Supports MP3, WAV, M4A, and MP4 files
         </p>
       </div>
       
       <div className="flex gap-2 mt-2">
-        {['.mp3', '.wav', '.m4a'].map((ext) => (
+        {['.mp3', '.wav', '.m4a', '.mp4'].map((ext) => (
           <span
             key={ext}
             className="px-3 py-1 text-xs font-mono rounded-full bg-secondary text-muted-foreground"
