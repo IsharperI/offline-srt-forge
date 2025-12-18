@@ -1,0 +1,172 @@
+import { useState } from 'react';
+import { Check, X, Clock, Edit2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { TranscriptSegment } from '@/lib/transcription';
+
+interface CaptionEditorProps {
+  filename: string;
+  segments: TranscriptSegment[];
+  onGenerate: (segments: TranscriptSegment[]) => void;
+  onCancel: () => void;
+}
+
+const formatTimestamp = (seconds: number): string => {
+  const mins = Math.floor(seconds / 60);
+  const secs = (seconds % 60).toFixed(1);
+  return `${mins}:${secs.padStart(4, '0')}`;
+};
+
+const parseTimestamp = (value: string): number | null => {
+  // Handle MM:SS.s format
+  const match = value.match(/^(\d+):(\d+(?:\.\d+)?)$/);
+  if (match) {
+    const mins = parseInt(match[1], 10);
+    const secs = parseFloat(match[2]);
+    return mins * 60 + secs;
+  }
+  // Handle plain seconds
+  const num = parseFloat(value);
+  return isNaN(num) ? null : num;
+};
+
+export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel }: CaptionEditorProps) {
+  const [segments, setSegments] = useState<TranscriptSegment[]>(initialSegments);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editStart, setEditStart] = useState('');
+  const [editEnd, setEditEnd] = useState('');
+
+  const startEditing = (index: number) => {
+    const segment = segments[index];
+    setEditingIndex(index);
+    setEditText(segment.text);
+    setEditStart(formatTimestamp(segment.startTime));
+    setEditEnd(formatTimestamp(segment.endTime));
+  };
+
+  const saveEdit = () => {
+    if (editingIndex === null) return;
+    
+    const startTime = parseTimestamp(editStart);
+    const endTime = parseTimestamp(editEnd);
+    
+    if (startTime === null || endTime === null || startTime >= endTime) {
+      return; // Invalid timestamps
+    }
+    
+    setSegments(prev => prev.map((seg, i) => 
+      i === editingIndex
+        ? { ...seg, text: editText.trim(), startTime, endTime }
+        : seg
+    ));
+    setEditingIndex(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingIndex(null);
+  };
+
+  const deleteSegment = (index: number) => {
+    setSegments(prev => prev.filter((_, i) => i !== index));
+    if (editingIndex === index) {
+      setEditingIndex(null);
+    }
+  };
+
+  const handleGenerate = () => {
+    const validSegments = segments.filter(s => s.text.trim());
+    onGenerate(validSegments);
+  };
+
+  return (
+    <div className="border border-border rounded-lg bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50">
+        <div>
+          <h3 className="font-medium text-foreground text-sm">{filename}</h3>
+          <p className="text-xs text-muted-foreground">{segments.length} caption{segments.length !== 1 ? 's' : ''}</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={handleGenerate} disabled={segments.length === 0}>
+            <Check className="w-4 h-4 mr-1" />
+            Generate SRT
+          </Button>
+        </div>
+      </div>
+      
+      <ScrollArea className="h-[400px]">
+        <div className="p-2 space-y-2">
+          {segments.map((segment, index) => (
+            <div key={index} className="border border-border rounded-md bg-background">
+              {editingIndex === index ? (
+                <div className="p-3 space-y-3">
+                  <div className="flex gap-2 items-center text-xs">
+                    <Clock className="w-3 h-3 text-muted-foreground" />
+                    <Input
+                      value={editStart}
+                      onChange={(e) => setEditStart(e.target.value)}
+                      className="w-20 h-7 text-xs"
+                      placeholder="0:00.0"
+                    />
+                    <span className="text-muted-foreground">→</span>
+                    <Input
+                      value={editEnd}
+                      onChange={(e) => setEditEnd(e.target.value)}
+                      className="w-20 h-7 text-xs"
+                      placeholder="0:00.0"
+                    />
+                  </div>
+                  <Textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="min-h-[80px] text-sm resize-none"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" onClick={saveEdit}>
+                      <Check className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div 
+                  className="p-3 cursor-pointer hover:bg-muted/50 transition-colors group"
+                  onClick={() => startEditing(index)}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {formatTimestamp(segment.startTime)} → {formatTimestamp(segment.endTime)}
+                    </span>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); startEditing(index); }}>
+                        <Edit2 className="w-3 h-3" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteSegment(index); }}>
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-sm text-foreground">{segment.text}</p>
+                </div>
+              )}
+            </div>
+          ))}
+          
+          {segments.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              No captions to display
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
