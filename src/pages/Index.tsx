@@ -5,6 +5,7 @@ import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
 import { ProcessedFile } from '@/components/ProcessedFile';
 import { ModelLoader } from '@/components/ModelLoader';
+import { CaptionEditor } from '@/components/CaptionEditor';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
@@ -14,6 +15,7 @@ import {
   downloadSRT,
   getAudioDuration,
   TranscriptionProgress,
+  TranscriptSegment,
 } from '@/lib/transcription';
 
 interface ProcessedFileData {
@@ -21,6 +23,13 @@ interface ProcessedFileData {
   filename: string;
   duration: number;
   srtContent: string;
+}
+
+interface ReviewFileData {
+  id: string;
+  filename: string;
+  duration: number;
+  segments: TranscriptSegment[];
 }
 
 interface ProcessingFile {
@@ -42,6 +51,7 @@ const Index = () => {
     message: 'Initializing...',
   });
   const [processingFiles, setProcessingFiles] = useState<ProcessingFile[]>([]);
+  const [reviewFiles, setReviewFiles] = useState<ReviewFileData[]>([]);
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   
@@ -83,18 +93,15 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
-      // Step C: Generate SRT (with re-indexing, duration clamping, and char limit)
-      const srtContent = generateSRT(cleanedSegments, duration, maxCharLimit);
-
-      // Remove from processing, add to completed
+      // Move to review state (instead of directly generating SRT)
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
-      setCompletedFiles(prev => [
+      setReviewFiles(prev => [
         ...prev,
         {
           id: fileId,
           filename: file.name,
           duration,
-          srtContent,
+          segments: cleanedSegments,
         },
       ]);
     } catch (error) {
@@ -133,7 +140,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [maxCharLimit]);
+  }, []);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -162,6 +169,30 @@ const Index = () => {
     // Start processing if not already
     processNextInQueue();
   }, [processNextInQueue]);
+
+  const handleGenerateSRT = useCallback((fileId: string, editedSegments: TranscriptSegment[]) => {
+    const reviewFile = reviewFiles.find(f => f.id === fileId);
+    if (!reviewFile) return;
+
+    // Step C: Generate SRT (with re-indexing, duration clamping, and char limit)
+    const srtContent = generateSRT(editedSegments, reviewFile.duration, maxCharLimit);
+
+    // Move to completed
+    setReviewFiles(prev => prev.filter(f => f.id !== fileId));
+    setCompletedFiles(prev => [
+      ...prev,
+      {
+        id: fileId,
+        filename: reviewFile.filename,
+        duration: reviewFile.duration,
+        srtContent,
+      },
+    ]);
+  }, [reviewFiles, maxCharLimit]);
+
+  const handleCancelReview = (fileId: string) => {
+    setReviewFiles(prev => prev.filter(f => f.id !== fileId));
+  };
 
   const handleDownload = (file: ProcessedFileData) => {
     downloadSRT(file.srtContent, file.filename);
@@ -239,7 +270,7 @@ const Index = () => {
                 value={maxCharLimit}
                 onChange={(e) => setMaxCharLimit(Math.max(20, Math.min(200, parseInt(e.target.value) || 80)))}
                 className="w-24"
-                disabled={isProcessing}
+                disabled={isProcessing || reviewFiles.length > 0}
               />
               <span className="text-xs text-muted-foreground">
                 (20-200)
@@ -253,7 +284,7 @@ const Index = () => {
           <div className="mb-6">
             <FileDropzone
               onFilesSelected={handleFilesSelected}
-              disabled={isProcessing}
+              disabled={isProcessing || reviewFiles.length > 0}
             />
           </div>
         )}
@@ -270,6 +301,24 @@ const Index = () => {
                 filename={file.filename}
                 progress={file.progress}
                 onRemove={() => handleRemoveProcessing(file.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Review/Edit Section */}
+        {reviewFiles.length > 0 && (
+          <div className="space-y-3 mb-6">
+            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              Review & Edit
+            </h2>
+            {reviewFiles.map(file => (
+              <CaptionEditor
+                key={file.id}
+                filename={file.filename}
+                segments={file.segments}
+                onGenerate={(segments) => handleGenerateSRT(file.id, segments)}
+                onCancel={() => handleCancelReview(file.id)}
               />
             ))}
           </div>
@@ -307,7 +356,7 @@ const Index = () => {
         )}
 
         {/* Empty State Info */}
-        {!isModelLoading && processingFiles.length === 0 && completedFiles.length === 0 && (
+        {!isModelLoading && processingFiles.length === 0 && reviewFiles.length === 0 && completedFiles.length === 0 && (
           <div className="text-center py-8">
             <p className="text-sm text-muted-foreground">
               Your files are processed entirely in your browser.
