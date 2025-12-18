@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Check, X, Clock, Edit2 } from 'lucide-react';
+import { Check, X, Clock, Edit2, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { TranscriptSegment } from '@/lib/transcription';
 
 interface CaptionEditorProps {
@@ -20,14 +21,12 @@ const formatTimestamp = (seconds: number): string => {
 };
 
 const parseTimestamp = (value: string): number | null => {
-  // Handle MM:SS.s format
   const match = value.match(/^(\d+):(\d+(?:\.\d+)?)$/);
   if (match) {
     const mins = parseInt(match[1], 10);
     const secs = parseFloat(match[2]);
     return mins * 60 + secs;
   }
-  // Handle plain seconds
   const num = parseFloat(value);
   return isNaN(num) ? null : num;
 };
@@ -38,6 +37,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
   const [editText, setEditText] = useState('');
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
 
   const startEditing = (index: number) => {
     const segment = segments[index];
@@ -54,7 +54,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
     const endTime = parseTimestamp(editEnd);
     
     if (startTime === null || endTime === null || startTime >= endTime) {
-      return; // Invalid timestamps
+      return;
     }
     
     setSegments(prev => prev.map((seg, i) => 
@@ -82,11 +82,20 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
   };
 
   return (
-    <div className="border border-border rounded-lg bg-card overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50">
-        <div>
-          <h3 className="font-medium text-foreground text-sm">{filename}</h3>
-          <p className="text-xs text-muted-foreground">{segments.length} caption{segments.length !== 1 ? 's' : ''}</p>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border border-border rounded-lg bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 bg-muted/50">
+        <div className="flex items-center gap-3">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <div>
+            <h3 className="font-medium text-foreground text-sm">{filename}</h3>
+            <p className="text-xs text-muted-foreground">
+              {segments.length} caption{segments.length !== 1 ? 's' : ''} — {isOpen ? 'click arrow to hide' : 'click arrow to preview/edit'}
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={onCancel}>
@@ -99,74 +108,78 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
         </div>
       </div>
       
-      <ScrollArea className="h-[400px]">
-        <div className="p-2 space-y-2">
-          {segments.map((segment, index) => (
-            <div key={index} className="border border-border rounded-md bg-background">
-              {editingIndex === index ? (
-                <div className="p-3 space-y-3">
-                  <div className="flex gap-2 items-center text-xs">
-                    <Clock className="w-3 h-3 text-muted-foreground" />
-                    <Input
-                      value={editStart}
-                      onChange={(e) => setEditStart(e.target.value)}
-                      className="w-20 h-7 text-xs"
-                      placeholder="0:00.0"
-                    />
-                    <span className="text-muted-foreground">→</span>
-                    <Input
-                      value={editEnd}
-                      onChange={(e) => setEditEnd(e.target.value)}
-                      className="w-20 h-7 text-xs"
-                      placeholder="0:00.0"
-                    />
-                  </div>
-                  <Textarea
-                    value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
-                    className="min-h-[80px] text-sm resize-none"
-                    autoFocus
-                  />
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={cancelEdit}>
-                      <X className="w-4 h-4" />
-                    </Button>
-                    <Button size="sm" onClick={saveEdit}>
-                      <Check className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div 
-                  className="p-3 cursor-pointer hover:bg-muted/50 transition-colors group"
-                  onClick={() => startEditing(index)}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {formatTimestamp(segment.startTime)} → {formatTimestamp(segment.endTime)}
-                    </span>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); startEditing(index); }}>
-                        <Edit2 className="w-3 h-3" />
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteSegment(index); }}>
-                        <X className="w-3 h-3" />
-                      </Button>
+      <CollapsibleContent>
+        <div className="border-t border-border">
+          <ScrollArea className="h-[400px]">
+            <div className="p-2 space-y-2">
+              {segments.map((segment, index) => (
+                <div key={index} className="border border-border rounded-md bg-background">
+                  {editingIndex === index ? (
+                    <div className="p-3 space-y-3">
+                      <div className="flex gap-2 items-center text-xs">
+                        <Clock className="w-3 h-3 text-muted-foreground" />
+                        <Input
+                          value={editStart}
+                          onChange={(e) => setEditStart(e.target.value)}
+                          className="w-20 h-7 text-xs"
+                          placeholder="0:00.0"
+                        />
+                        <span className="text-muted-foreground">→</span>
+                        <Input
+                          value={editEnd}
+                          onChange={(e) => setEditEnd(e.target.value)}
+                          className="w-20 h-7 text-xs"
+                          placeholder="0:00.0"
+                        />
+                      </div>
+                      <Textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        className="min-h-[80px] text-sm resize-none"
+                        autoFocus
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                          <X className="w-4 h-4" />
+                        </Button>
+                        <Button size="sm" onClick={saveEdit}>
+                          <Check className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                  <p className="text-sm text-foreground">{segment.text}</p>
+                  ) : (
+                    <div 
+                      className="p-3 cursor-pointer hover:bg-muted/50 transition-colors group"
+                      onClick={() => startEditing(index)}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-muted-foreground font-mono">
+                          {formatTimestamp(segment.startTime)} → {formatTimestamp(segment.endTime)}
+                        </span>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); startEditing(index); }}>
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteSegment(index); }}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-sm text-foreground">{segment.text}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {segments.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  No captions to display
                 </div>
               )}
             </div>
-          ))}
-          
-          {segments.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              No captions to display
-            </div>
-          )}
+          </ScrollArea>
         </div>
-      </ScrollArea>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
