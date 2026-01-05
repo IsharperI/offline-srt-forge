@@ -1,0 +1,176 @@
+import { useState } from 'react';
+import { ChevronDown, ExternalLink, Upload } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  description: string;
+  isCustom?: boolean;
+}
+
+export const PRESET_MODELS: ModelOption[] = [
+  {
+    id: 'onnx-community/whisper-tiny.en',
+    name: 'Whisper Tiny (English)',
+    description: 'Fast, English-only (~40MB)',
+  },
+  {
+    id: 'onnx-community/whisper-tiny',
+    name: 'Whisper Tiny (Multilingual)',
+    description: 'Fast, supports 99 languages (~40MB)',
+  },
+  {
+    id: 'onnx-community/whisper-small.en',
+    name: 'Whisper Small (English)',
+    description: 'Balanced speed/accuracy, English-only (~240MB)',
+  },
+  {
+    id: 'onnx-community/whisper-small',
+    name: 'Whisper Small (Multilingual)',
+    description: 'Balanced, supports 99 languages (~240MB)',
+  },
+  {
+    id: 'onnx-community/whisper-base.en',
+    name: 'Whisper Base (English)',
+    description: 'Good accuracy, English-only (~140MB)',
+  },
+  {
+    id: 'onnx-community/whisper-base',
+    name: 'Whisper Base (Multilingual)',
+    description: 'Good accuracy, 99 languages (~140MB)',
+  },
+  {
+    id: 'custom',
+    name: 'Custom Model',
+    description: 'Use a custom Hugging Face model',
+    isCustom: true,
+  },
+];
+
+interface ModelSelectorProps {
+  selectedModel: string;
+  onModelChange: (modelId: string) => void;
+  disabled?: boolean;
+}
+
+export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelSelectorProps) {
+  const [isCustomOpen, setIsCustomOpen] = useState(false);
+  const [customModelId, setCustomModelId] = useState('');
+  
+  const isUsingCustom = !PRESET_MODELS.find(m => m.id === selectedModel && !m.isCustom);
+  const currentPreset = PRESET_MODELS.find(m => m.id === selectedModel);
+  const displayValue = currentPreset ? selectedModel : 'custom';
+
+  const handleSelectChange = (value: string) => {
+    if (value === 'custom') {
+      setIsCustomOpen(true);
+      // Don't change model until custom is applied
+    } else {
+      setIsCustomOpen(false);
+      onModelChange(value);
+    }
+  };
+
+  const handleApplyCustomModel = () => {
+    if (customModelId.trim()) {
+      onModelChange(customModelId.trim());
+      setIsCustomOpen(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-4">
+        <Label htmlFor="modelSelect" className="text-sm font-medium text-foreground whitespace-nowrap">
+          Speech Model:
+        </Label>
+        <Select
+          value={displayValue}
+          onValueChange={handleSelectChange}
+          disabled={disabled}
+        >
+          <SelectTrigger className="w-64">
+            <SelectValue placeholder="Select a model" />
+          </SelectTrigger>
+          <SelectContent>
+            {PRESET_MODELS.map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">{model.name}</span>
+                  <span className="text-xs text-muted-foreground">{model.description}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Custom Model Input */}
+      <Collapsible open={isCustomOpen || isUsingCustom} onOpenChange={setIsCustomOpen}>
+        <CollapsibleContent className="space-y-3">
+          <div className="p-4 rounded-lg bg-muted/50 border border-border space-y-3">
+            <div className="flex items-start gap-2">
+              <Upload className="w-4 h-4 text-muted-foreground mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-foreground">Custom Hugging Face Model</p>
+                <p className="text-xs text-muted-foreground">
+                  Enter a model ID from Hugging Face that supports automatic-speech-recognition with ONNX.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g., onnx-community/whisper-medium.en"
+                value={isUsingCustom && !customModelId ? selectedModel : customModelId}
+                onChange={(e) => setCustomModelId(e.target.value)}
+                disabled={disabled}
+                className="flex-1"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleApplyCustomModel}
+                disabled={disabled || !customModelId.trim()}
+              >
+                Apply
+              </Button>
+            </div>
+
+            <a
+              href="https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&library=transformers.js"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Browse compatible models on Hugging Face
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Show current custom model if using one */}
+      {isUsingCustom && !isCustomOpen && (
+        <div className="text-xs text-muted-foreground">
+          Using custom model: <code className="bg-muted px-1 py-0.5 rounded">{selectedModel}</code>
+        </div>
+      )}
+    </div>
+  );
+}
