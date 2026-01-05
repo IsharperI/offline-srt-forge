@@ -15,19 +15,33 @@ export interface TranscriptionProgress {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let transcriber: any = null;
 let isLoading = false;
+let currentModelId: string | null = null;
+
+const DEFAULT_MODEL = 'onnx-community/whisper-tiny.en';
 
 export async function initializeTranscriber(
-  onProgress?: (progress: TranscriptionProgress) => void
+  onProgress?: (progress: TranscriptionProgress) => void,
+  modelId: string = DEFAULT_MODEL
 ): Promise<void> {
-  if (transcriber || isLoading) return;
+  // If we already have a transcriber for this model, skip
+  if (transcriber && currentModelId === modelId) return;
+  
+  // If loading is in progress, wait
+  if (isLoading) return;
+  
+  // If switching models, reset the transcriber
+  if (currentModelId !== modelId) {
+    transcriber = null;
+    currentModelId = null;
+  }
   
   isLoading = true;
-  onProgress?.({ status: 'loading', progress: 0, message: 'Loading speech recognition model...' });
+  onProgress?.({ status: 'loading', progress: 0, message: `Loading model: ${modelId}...` });
   
   try {
     const result = await pipeline(
       "automatic-speech-recognition",
-      "onnx-community/whisper-tiny.en",
+      modelId,
       {
         progress_callback: (data: { progress?: number; status?: string }) => {
           if (data.progress) {
@@ -48,7 +62,8 @@ export async function initializeTranscriber(
     }
     
     transcriber = result;
-    console.log('Transcriber initialized successfully:', typeof transcriber);
+    currentModelId = modelId;
+    console.log('Transcriber initialized successfully:', typeof transcriber, 'Model:', modelId);
     onProgress?.({ status: 'loading', progress: 100, message: 'Model loaded successfully' });
   } catch (error) {
     console.error('Failed to load transcriber:', error);
@@ -56,6 +71,15 @@ export async function initializeTranscriber(
   } finally {
     isLoading = false;
   }
+}
+
+export function getCurrentModelId(): string | null {
+  return currentModelId;
+}
+
+export function resetTranscriber(): void {
+  transcriber = null;
+  currentModelId = null;
 }
 
 // Add inaudible noise to prevent silence detection
@@ -146,12 +170,15 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
 
 export async function transcribeAudio(
   audioFile: File,
-  onProgress?: (progress: TranscriptionProgress) => void
+  onProgress?: (progress: TranscriptionProgress) => void,
+  modelId?: string
 ): Promise<TranscriptSegment[]> {
-  // Ensure transcriber is initialized and valid
-  if (!transcriber || typeof transcriber !== 'function') {
-    transcriber = null; // Reset if invalid
-    await initializeTranscriber(onProgress);
+  const targetModel = modelId || 'onnx-community/whisper-tiny.en';
+  
+  // Ensure transcriber is initialized and valid for the correct model
+  if (!transcriber || typeof transcriber !== 'function' || currentModelId !== targetModel) {
+    transcriber = null; // Reset if invalid or different model
+    await initializeTranscriber(onProgress, targetModel);
   }
   
   if (typeof transcriber !== 'function') {

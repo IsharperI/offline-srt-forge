@@ -6,6 +6,7 @@ import { ProcessingProgress } from '@/components/ProcessingProgress';
 import { ProcessedFile } from '@/components/ProcessedFile';
 import { ModelLoader } from '@/components/ModelLoader';
 import { CaptionEditor } from '@/components/CaptionEditor';
+import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
@@ -14,6 +15,7 @@ import {
   generateSRT,
   downloadSRT,
   getAudioDuration,
+  resetTranscriber,
   TranscriptionProgress,
   TranscriptSegment,
 } from '@/lib/transcription';
@@ -54,6 +56,7 @@ const Index = () => {
   const [reviewFiles, setReviewFiles] = useState<ReviewFileData[]>([]);
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
+  const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
@@ -87,8 +90,8 @@ const Index = () => {
         );
       };
 
-      // Step A: Raw transcription
-      const rawSegments = await transcribeAudio(file, updateProgress);
+      // Step A: Raw transcription (pass selected model)
+      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel);
 
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
@@ -140,7 +143,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, []);
+  }, [selectedModel]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -255,9 +258,17 @@ const Index = () => {
           </div>
         )}
 
-        {/* Character Limit Setting */}
+        {/* Model & Settings */}
         {!isModelLoading && (
-          <div className="mb-4 p-4 rounded-lg bg-secondary/50 border border-border">
+          <div className="mb-4 p-4 rounded-lg bg-secondary/50 border border-border space-y-4">
+            {/* Model Selection */}
+            <ModelSelector
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              disabled={isProcessing || reviewFiles.length > 0}
+            />
+
+            {/* Character Limit Setting */}
             <div className="flex items-center gap-4">
               <Label htmlFor="charLimit" className="text-sm font-medium text-foreground whitespace-nowrap">
                 Max characters per caption:
