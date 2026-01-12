@@ -367,10 +367,31 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
 
 const DEFAULT_MAX_LINE_LENGTH = 80;
 const MIN_WORDS_PER_CAPTION = 3;
+const MIN_WORDS_ABSOLUTE = 2; // Caption must always have more than 1 word
 
-// Split text into chunks respecting word boundaries, max length, and minimum word count
-// PRIORITY: Minimum 3 words per caption takes precedence over character limit
-function splitTextIntoChunks(text: string, maxLength: number): string[] {
+// Split text by sentences (. ! ?) while preserving the delimiters
+function splitBySentences(text: string): string[] {
+  // Match sentences ending with . ! ? followed by space or end of string
+  const sentenceRegex = /[^.!?]*[.!?]+(?:\s+|$)|[^.!?]+$/g;
+  const matches = text.match(sentenceRegex);
+  
+  if (!matches) return [text.trim()];
+  
+  return matches
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+}
+
+// Split text by commas
+function splitByCommas(text: string): string[] {
+  const parts = text.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  
+  // Preserve commas except for the last part
+  return parts.map((part, i) => i < parts.length - 1 ? part + ',' : part);
+}
+
+// Split by word count respecting max length and minimum word requirements
+function splitByMaxLength(text: string, maxLength: number): string[] {
   const words = text.split(' ').filter(w => w.length > 0);
   
   // If total words <= MIN_WORDS_PER_CAPTION, return as single chunk regardless of length
@@ -423,6 +444,76 @@ function splitTextIntoChunks(text: string, maxLength: number): string[] {
   }
   
   return chunks;
+}
+
+// Ensure each chunk has more than 1 word by merging if necessary
+function ensureMinWords(chunks: string[]): string[] {
+  if (chunks.length <= 1) return chunks;
+  
+  const result: string[] = [];
+  
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const wordCount = chunk.split(' ').filter(w => w.length > 0).length;
+    
+    if (wordCount < MIN_WORDS_ABSOLUTE) {
+      // Merge with previous or next chunk
+      if (result.length > 0) {
+        result[result.length - 1] = result[result.length - 1] + ' ' + chunk;
+      } else if (i < chunks.length - 1) {
+        chunks[i + 1] = chunk + ' ' + chunks[i + 1];
+      } else {
+        result.push(chunk);
+      }
+    } else {
+      result.push(chunk);
+    }
+  }
+  
+  return result;
+}
+
+// Split text into chunks with priority:
+// 1. Sentences first
+// 2. If sentence > maxLength, split by commas
+// 3. If still > maxLength or no commas, split by maxLength (min 3 words per chunk)
+// 4. Always ensure more than 1 word per caption
+function splitTextIntoChunks(text: string, maxLength: number): string[] {
+  // Step 1: Split by sentences
+  const sentences = splitBySentences(text);
+  
+  const allChunks: string[] = [];
+  
+  for (const sentence of sentences) {
+    // If sentence fits, keep it as-is
+    if (sentence.length <= maxLength) {
+      allChunks.push(sentence);
+      continue;
+    }
+    
+    // Step 2: Try splitting by commas
+    const commaParts = splitByCommas(sentence);
+    
+    if (commaParts.length > 1) {
+      // Process each comma-separated part
+      for (const part of commaParts) {
+        if (part.length <= maxLength) {
+          allChunks.push(part);
+        } else {
+          // Step 3: Split by max length with min word requirements
+          const lengthChunks = splitByMaxLength(part, maxLength);
+          allChunks.push(...lengthChunks);
+        }
+      }
+    } else {
+      // No commas - Step 3: Split by max length with min word requirements
+      const lengthChunks = splitByMaxLength(sentence, maxLength);
+      allChunks.push(...lengthChunks);
+    }
+  }
+  
+  // Step 4: Ensure all chunks have more than 1 word
+  return ensureMinWords(allChunks);
 }
 
 // Split segments that exceed max characters with proportional timestamps
