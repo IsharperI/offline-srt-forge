@@ -137,6 +137,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
                         onChange={(e) => setEditText(e.target.value)}
                         className="min-h-[80px] text-sm resize-none"
                         autoFocus
+                        spellCheck={true}
                       />
                       <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" onClick={cancelEdit}>
