@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ExternalLink, Upload } from 'lucide-react';
+import { ChevronDown, ExternalLink, Upload, AlertCircle } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -15,6 +15,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+
+// Regex pattern for valid Hugging Face model IDs: username/model-name
+const HF_MODEL_ID_PATTERN = /^[\w-]+\/[\w.-]+$/;
+
+// Validate Hugging Face model ID format
+const isValidModelId = (modelId: string): boolean => {
+  return HF_MODEL_ID_PATTERN.test(modelId.trim());
+};
 
 export interface ModelOption {
   id: string;
@@ -71,6 +79,7 @@ interface ModelSelectorProps {
 export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelSelectorProps) {
   const [isCustomOpen, setIsCustomOpen] = useState(false);
   const [customModelId, setCustomModelId] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
   
   const isUsingCustom = !PRESET_MODELS.find(m => m.id === selectedModel && !m.isCustom);
   const currentPreset = PRESET_MODELS.find(m => m.id === selectedModel);
@@ -79,18 +88,39 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
   const handleSelectChange = (value: string) => {
     if (value === 'custom') {
       setIsCustomOpen(true);
+      setValidationError(null);
       // Don't change model until custom is applied
     } else {
       setIsCustomOpen(false);
+      setValidationError(null);
       onModelChange(value);
     }
   };
 
-  const handleApplyCustomModel = () => {
-    if (customModelId.trim()) {
-      onModelChange(customModelId.trim());
-      setIsCustomOpen(false);
+  const handleCustomModelChange = (value: string) => {
+    setCustomModelId(value);
+    // Clear error when user starts typing
+    if (validationError) {
+      setValidationError(null);
     }
+  };
+
+  const handleApplyCustomModel = () => {
+    const trimmedId = customModelId.trim();
+    
+    if (!trimmedId) {
+      setValidationError('Please enter a model ID');
+      return;
+    }
+    
+    if (!isValidModelId(trimmedId)) {
+      setValidationError('Invalid format. Model ID must be: username/model-name (e.g., onnx-community/whisper-medium.en)');
+      return;
+    }
+    
+    setValidationError(null);
+    onModelChange(trimmedId);
+    setIsCustomOpen(false);
   };
 
   return (
@@ -138,9 +168,9 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
               <Input
                 placeholder="e.g., onnx-community/whisper-medium.en"
                 value={isUsingCustom && !customModelId ? selectedModel : customModelId}
-                onChange={(e) => setCustomModelId(e.target.value)}
+                onChange={(e) => handleCustomModelChange(e.target.value)}
                 disabled={disabled}
-                className="flex-1"
+                className={`flex-1 ${validationError ? 'border-destructive' : ''}`}
               />
               <Button
                 variant="secondary"
@@ -151,6 +181,13 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
                 Apply
               </Button>
             </div>
+
+            {validationError && (
+              <div className="flex items-center gap-1 text-destructive text-xs">
+                <AlertCircle className="w-3 h-3" />
+                <span>{validationError}</span>
+              </div>
+            )}
 
             <a
               href="https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&library=transformers.js"
