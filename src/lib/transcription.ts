@@ -366,42 +366,60 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
 // Step C: Re-indexing (handled during SRT generation)
 
 const DEFAULT_MAX_LINE_LENGTH = 80;
+const MIN_WORDS_PER_CAPTION = 3;
 
-// Split text into chunks respecting word boundaries and max length
+// Split text into chunks respecting word boundaries, max length, and minimum word count
+// PRIORITY: Minimum 3 words per caption takes precedence over character limit
 function splitTextIntoChunks(text: string, maxLength: number): string[] {
+  const words = text.split(' ').filter(w => w.length > 0);
+  
+  // If total words <= MIN_WORDS_PER_CAPTION, return as single chunk regardless of length
+  if (words.length <= MIN_WORDS_PER_CAPTION) {
+    return [text];
+  }
+  
+  // If text fits within max length, return as-is
   if (text.length <= maxLength) {
     return [text];
   }
   
-  const words = text.split(' ');
   const chunks: string[] = [];
-  let currentChunk = '';
+  let currentWords: string[] = [];
   
-  for (const word of words) {
-    const testChunk = currentChunk ? `${currentChunk} ${word}` : word;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const testChunk = [...currentWords, word].join(' ');
+    const remainingWords = words.length - i - 1;
     
-    if (testChunk.length <= maxLength) {
-      currentChunk = testChunk;
+    // Check if adding this word exceeds max length
+    if (testChunk.length > maxLength && currentWords.length >= MIN_WORDS_PER_CAPTION) {
+      // We have enough words and exceeded limit - save current chunk
+      chunks.push(currentWords.join(' '));
+      currentWords = [word];
+    } else if (testChunk.length > maxLength && currentWords.length < MIN_WORDS_PER_CAPTION) {
+      // Exceeded limit but don't have minimum words yet - keep adding
+      currentWords.push(word);
+      
+      // If we now have minimum words and remaining words can form valid chunks, split here
+      if (currentWords.length >= MIN_WORDS_PER_CAPTION && remainingWords >= MIN_WORDS_PER_CAPTION) {
+        chunks.push(currentWords.join(' '));
+        currentWords = [];
+      }
     } else {
-      if (currentChunk) {
-        chunks.push(currentChunk);
-      }
-      // Handle words longer than maxLength
-      if (word.length > maxLength) {
-        let remaining = word;
-        while (remaining.length > maxLength) {
-          chunks.push(remaining.slice(0, maxLength));
-          remaining = remaining.slice(maxLength);
-        }
-        currentChunk = remaining;
-      } else {
-        currentChunk = word;
-      }
+      // Still within limit, add the word
+      currentWords.push(word);
     }
   }
   
-  if (currentChunk) {
-    chunks.push(currentChunk);
+  // Handle remaining words
+  if (currentWords.length > 0) {
+    if (currentWords.length < MIN_WORDS_PER_CAPTION && chunks.length > 0) {
+      // Merge with previous chunk to ensure minimum words
+      const lastChunk = chunks.pop()!;
+      chunks.push(lastChunk + ' ' + currentWords.join(' '));
+    } else {
+      chunks.push(currentWords.join(' '));
+    }
   }
   
   return chunks;
