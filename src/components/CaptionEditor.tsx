@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Check, X, Clock, Edit2, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,12 +6,17 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { TranscriptSegment } from '@/lib/transcription';
+import { autoCorrect, CorrectionResult } from '@/lib/spellcheck';
 
 interface CaptionEditorProps {
   filename: string;
   segments: TranscriptSegment[];
   onGenerate: (segments: TranscriptSegment[]) => void;
   onCancel: () => void;
+}
+
+interface SegmentWithCorrections extends TranscriptSegment {
+  corrections?: CorrectionResult['corrections'];
 }
 
 const formatTimestamp = (seconds: number): string => {
@@ -31,13 +36,64 @@ const parseTimestamp = (value: string): number | null => {
   return isNaN(num) ? null : num;
 };
 
+// Render text with corrected words highlighted in pink
+function HighlightedText({ text, corrections }: { text: string; corrections?: CorrectionResult['corrections'] }) {
+  if (!corrections || corrections.length === 0) {
+    return <>{text}</>;
+  }
+  
+  // Get the corrected words to highlight
+  const correctedWords = new Set(corrections.map(c => c.corrected.toLowerCase()));
+  
+  // Split text into words and whitespace, preserving both
+  const parts = text.split(/(\s+)/);
+  
+  return (
+    <>
+      {parts.map((part, index) => {
+        const isWord = part.trim().length > 0;
+        const isCorrected = isWord && correctedWords.has(part.toLowerCase());
+        
+        if (isCorrected) {
+          // Remove from set to handle duplicates (only highlight first occurrence per correction)
+          correctedWords.delete(part.toLowerCase());
+          return (
+            <span 
+              key={index} 
+              className="text-pink-500 font-medium"
+              title="Auto-corrected"
+            >
+              {part}
+            </span>
+          );
+        }
+        
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel }: CaptionEditorProps) {
-  const [segments, setSegments] = useState<TranscriptSegment[]>(initialSegments);
+  const [segments, setSegments] = useState<SegmentWithCorrections[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+
+  // Auto-correct segments on initial load
+  useEffect(() => {
+    const correctedSegments = initialSegments.map(segment => {
+      const result = autoCorrect(segment.text);
+      return {
+        ...segment,
+        text: result.correctedText,
+        corrections: result.corrections,
+      };
+    });
+    setSegments(correctedSegments);
+  }, [initialSegments]);
 
   const startEditing = (index: number) => {
     const segment = segments[index];
@@ -57,9 +113,18 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
       return;
     }
     
+    // Auto-correct the edited text
+    const result = autoCorrect(editText.trim());
+    
     setSegments(prev => prev.map((seg, i) => 
       i === editingIndex
-        ? { ...seg, text: editText.trim(), startTime, endTime }
+        ? { 
+            ...seg, 
+            text: result.correctedText, 
+            startTime, 
+            endTime,
+            corrections: result.corrections,
+          }
         : seg
     ));
     setEditingIndex(null);
@@ -166,7 +231,9 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
                           </Button>
                         </div>
                       </div>
-                      <p className="text-sm text-foreground">{segment.text}</p>
+                      <p className="text-sm text-foreground">
+                        <HighlightedText text={segment.text} corrections={segment.corrections} />
+                      </p>
                     </div>
                   )}
                 </div>
