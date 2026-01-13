@@ -417,258 +417,266 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
 // Step C: Re-indexing (handled during SRT generation)
 
 const DEFAULT_MAX_LINE_LENGTH = 80;
-const MIN_WORDS_PER_CAPTION = 3;
-const MIN_WORDS_ABSOLUTE = 2; // Caption must always have more than 1 word
+const MIN_WORDS_PER_SEGMENT = 3;
 
-// Group words into natural segments (sentences/phrases) while preserving word timings
-function groupWordsIntoSegments(words: WordTiming[]): TranscriptSegment[] {
-  if (words.length === 0) return [];
-  
-  const segments: TranscriptSegment[] = [];
-  let currentWords: WordTiming[] = [];
-  
-  for (const word of words) {
-    currentWords.push(word);
-    
-    // Check if this word ends a sentence
-    if (/[.!?]$/.test(word.word)) {
-      segments.push({
-        startTime: currentWords[0].start,
-        endTime: currentWords[currentWords.length - 1].end,
-        text: currentWords.map(w => w.word).join(' '),
-        words: [...currentWords],
-      });
-      currentWords = [];
+// Conjunctions and prepositions to break BEFORE
+const BREAK_BEFORE_WORDS = new Set([
+  'and', 'but', 'so', 'because', 'or', 'yet', 'nor',
+  'for', 'in', 'on', 'at', 'to', 'with', 'from', 'by',
+  'of', 'about', 'into', 'through', 'during', 'before',
+  'after', 'above', 'below', 'between', 'under', 'over',
+  'while', 'although', 'though', 'unless', 'until', 'when',
+  'where', 'if', 'then', 'than', 'as', 'since', 'that', 'which'
+]);
+
+// Short standalone interjections that should NOT be merged
+const STANDALONE_INTERJECTIONS = new Set([
+  'no.', 'yes.', 'no!', 'yes!', 'ok.', 'okay.',
+  'yes, sir.', 'no, sir.', 'yes, ma\'am.', 'no, ma\'am.',
+  'right.', 'sure.', 'fine.', 'thanks.', 'please.',
+  'wow.', 'oh.', 'ah.', 'hmm.', 'well.',
+]);
+
+interface CaptionSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+// Check if a word ends with sentence-ending punctuation
+function endsSentence(word: string): boolean {
+  return /[.!?]$/.test(word);
+}
+
+// Check if a word ends with a comma
+function endsWithComma(word: string): boolean {
+  return /,$/.test(word);
+}
+
+// Check if text is a standalone interjection
+function isStandaloneInterjection(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  return STANDALONE_INTERJECTIONS.has(normalized);
+}
+
+// Find the best break point within a word range
+function findBestBreakPoint(
+  words: WordTiming[],
+  startIdx: number,
+  endIdx: number,
+  maxLength: number
+): number {
+  let currentLength = 0;
+  let lastGoodBreak = startIdx;
+  let lastPunctuationBreak = -1;
+  let lastCommaBreak = -1;
+  let lastConjunctionBreak = -1;
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    const word = words[i].word;
+    const addLength = (i === startIdx ? 0 : 1) + word.length; // +1 for space
+
+    // Check if adding this word exceeds max length
+    if (currentLength + addLength > maxLength && i > startIdx) {
+      // Return the best break point found
+      if (lastPunctuationBreak >= startIdx + MIN_WORDS_PER_SEGMENT - 1) {
+        return lastPunctuationBreak + 1;
+      }
+      if (lastCommaBreak >= startIdx + MIN_WORDS_PER_SEGMENT - 1) {
+        return lastCommaBreak + 1;
+      }
+      if (lastConjunctionBreak >= startIdx + MIN_WORDS_PER_SEGMENT - 1) {
+        return lastConjunctionBreak;
+      }
+      // Fallback: break at current position if we have minimum words
+      if (i - startIdx >= MIN_WORDS_PER_SEGMENT) {
+        return i;
+      }
+      // Keep going to ensure minimum words
+      lastGoodBreak = i;
+    }
+
+    currentLength += addLength;
+
+    // Track potential break points
+    if (endsSentence(word)) {
+      lastPunctuationBreak = i;
+    }
+    if (endsWithComma(word)) {
+      lastCommaBreak = i;
+    }
+    // Check if NEXT word is a conjunction/preposition
+    if (i < endIdx && BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?]$/, ''))) {
+      lastConjunctionBreak = i + 1;
     }
   }
-  
-  // Push remaining words as final segment
-  if (currentWords.length > 0) {
+
+  return endIdx + 1;
+}
+
+// Process words into caption segments with proper timing
+function processWordsIntoSegments(
+  words: WordTiming[],
+  maxLength: number
+): CaptionSegment[] {
+  if (words.length === 0) return [];
+
+  const segments: CaptionSegment[] = [];
+  let currentStart = 0;
+
+  while (currentStart < words.length) {
+    // Build text from current position to find where we need to break
+    let currentText = '';
+    let sentenceEndIdx = -1;
+    let potentialEnd = words.length - 1;
+
+    // First, try to find a sentence end within limits
+    for (let i = currentStart; i < words.length; i++) {
+      const word = words[i].word;
+      const testText = currentText + (currentText ? ' ' : '') + word;
+
+      if (endsSentence(word)) {
+        if (testText.length <= maxLength) {
+          sentenceEndIdx = i;
+        } else if (sentenceEndIdx === -1) {
+          // Sentence is too long, need to break before end
+          break;
+        }
+      }
+
+      if (testText.length > maxLength && i > currentStart) {
+        potentialEnd = i - 1;
+        break;
+      }
+
+      currentText = testText;
+      potentialEnd = i;
+    }
+
+    // Determine the actual end of this segment
+    let segmentEnd: number;
+
+    if (sentenceEndIdx >= currentStart && words.slice(currentStart, sentenceEndIdx + 1).map(w => w.word).join(' ').length <= maxLength) {
+      // Complete sentence fits
+      segmentEnd = sentenceEndIdx;
+    } else {
+      // Need to find best break point
+      segmentEnd = findBestBreakPoint(words, currentStart, potentialEnd, maxLength) - 1;
+      if (segmentEnd < currentStart) segmentEnd = currentStart;
+    }
+
+    // Ensure we have at least one word
+    if (segmentEnd < currentStart) {
+      segmentEnd = currentStart;
+    }
+
+    // Create segment
+    const segmentWords = words.slice(currentStart, segmentEnd + 1);
+    const text = segmentWords.map(w => w.word).join(' ');
+
     segments.push({
-      startTime: currentWords[0].start,
-      endTime: currentWords[currentWords.length - 1].end,
-      text: currentWords.map(w => w.word).join(' '),
-      words: [...currentWords],
+      text,
+      start: segmentWords[0].start,
+      end: segmentWords[segmentWords.length - 1].end,
     });
+
+    currentStart = segmentEnd + 1;
   }
-  
+
   return segments;
 }
 
-// Split text by sentences (. ! ?) while preserving the delimiters
-function splitBySentences(text: string): string[] {
-  // Match sentences ending with . ! ? followed by space or end of string
-  const sentenceRegex = /[^.!?]*[.!?]+(?:\s+|$)|[^.!?]+$/g;
-  const matches = text.match(sentenceRegex);
-  
-  if (!matches) return [text.trim()];
-  
-  return matches
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
-}
+// Apply anti-orphan logic (3-word rule)
+function applyAntiOrphanLogic(segments: CaptionSegment[]): CaptionSegment[] {
+  if (segments.length <= 1) return segments;
 
-// Split text by commas
-function splitByCommas(text: string): string[] {
-  const parts = text.split(',').map(s => s.trim()).filter(s => s.length > 0);
-  
-  // Preserve commas except for the last part
-  return parts.map((part, i) => i < parts.length - 1 ? part + ',' : part);
-}
+  const result: CaptionSegment[] = [];
 
-// Split by word count respecting max length and minimum word requirements
-function splitByMaxLength(text: string, maxLength: number): string[] {
-  const words = text.split(' ').filter(w => w.length > 0);
-  
-  // If total words <= MIN_WORDS_PER_CAPTION, return as single chunk regardless of length
-  if (words.length <= MIN_WORDS_PER_CAPTION) {
-    return [text];
-  }
-  
-  // If text fits within max length, return as-is
-  if (text.length <= maxLength) {
-    return [text];
-  }
-  
-  const chunks: string[] = [];
-  let currentWords: string[] = [];
-  
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    const testChunk = [...currentWords, word].join(' ');
-    const remainingWords = words.length - i - 1;
-    
-    // Check if adding this word exceeds max length
-    if (testChunk.length > maxLength && currentWords.length >= MIN_WORDS_PER_CAPTION) {
-      // We have enough words and exceeded limit - save current chunk
-      chunks.push(currentWords.join(' '));
-      currentWords = [word];
-    } else if (testChunk.length > maxLength && currentWords.length < MIN_WORDS_PER_CAPTION) {
-      // Exceeded limit but don't have minimum words yet - keep adding
-      currentWords.push(word);
-      
-      // If we now have minimum words and remaining words can form valid chunks, split here
-      if (currentWords.length >= MIN_WORDS_PER_CAPTION && remainingWords >= MIN_WORDS_PER_CAPTION) {
-        chunks.push(currentWords.join(' '));
-        currentWords = [];
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const wordCount = segment.text.split(/\s+/).filter(w => w.length > 0).length;
+
+    // Check if this segment has fewer than 3 words
+    if (wordCount < MIN_WORDS_PER_SEGMENT) {
+      // Exception: standalone interjections should not be merged
+      if (isStandaloneInterjection(segment.text)) {
+        result.push(segment);
+        continue;
       }
-    } else {
-      // Still within limit, add the word
-      currentWords.push(word);
-    }
-  }
-  
-  // Handle remaining words
-  if (currentWords.length > 0) {
-    if (currentWords.length < MIN_WORDS_PER_CAPTION && chunks.length > 0) {
-      // Merge with previous chunk to ensure minimum words
-      const lastChunk = chunks.pop()!;
-      chunks.push(lastChunk + ' ' + currentWords.join(' '));
-    } else {
-      chunks.push(currentWords.join(' '));
-    }
-  }
-  
-  return chunks;
-}
 
-// Ensure each chunk has more than 1 word by merging if necessary
-function ensureMinWords(chunks: string[]): string[] {
-  if (chunks.length <= 1) return chunks;
-  
-  const result: string[] = [];
-  
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    const wordCount = chunk.split(' ').filter(w => w.length > 0).length;
-    
-    if (wordCount < MIN_WORDS_ABSOLUTE) {
-      // Merge with previous or next chunk
+      // Try to merge with preceding segment (unless it ends with a period)
       if (result.length > 0) {
-        result[result.length - 1] = result[result.length - 1] + ' ' + chunk;
-      } else if (i < chunks.length - 1) {
-        chunks[i + 1] = chunk + ' ' + chunks[i + 1];
-      } else {
-        result.push(chunk);
-      }
-    } else {
-      result.push(chunk);
-    }
-  }
-  
-  return result;
-}
+        const prevSegment = result[result.length - 1];
+        const prevEndsWithPeriod = /\.\s*$/.test(prevSegment.text);
 
-// Split text into chunks with priority:
-// 1. Sentences first
-// 2. If sentence > maxLength, split by commas
-// 3. If still > maxLength or no commas, split by maxLength (min 3 words per chunk)
-// 4. Always ensure more than 1 word per caption
-function splitTextIntoChunks(text: string, maxLength: number): string[] {
-  // Step 1: Split by sentences
-  const sentences = splitBySentences(text);
-  
-  const allChunks: string[] = [];
-  
-  for (const sentence of sentences) {
-    // If sentence fits, keep it as-is
-    if (sentence.length <= maxLength) {
-      allChunks.push(sentence);
-      continue;
-    }
-    
-    // Step 2: Try splitting by commas
-    const commaParts = splitByCommas(sentence);
-    
-    if (commaParts.length > 1) {
-      // Process each comma-separated part
-      for (const part of commaParts) {
-        if (part.length <= maxLength) {
-          allChunks.push(part);
-        } else {
-          // Step 3: Split by max length with min word requirements
-          const lengthChunks = splitByMaxLength(part, maxLength);
-          allChunks.push(...lengthChunks);
+        if (!prevEndsWithPeriod) {
+          // Merge with previous
+          result[result.length - 1] = {
+            text: prevSegment.text + ' ' + segment.text,
+            start: prevSegment.start,
+            end: segment.end,
+          };
+          continue;
         }
       }
-    } else {
-      // No commas - Step 3: Split by max length with min word requirements
-      const lengthChunks = splitByMaxLength(sentence, maxLength);
-      allChunks.push(...lengthChunks);
-    }
-  }
-  
-  // Step 4: Ensure all chunks have more than 1 word
-  return ensureMinWords(allChunks);
-}
 
-// Split segments that exceed max characters using word-level timestamps
-function splitLongSegments(segments: TranscriptSegment[], maxLineLength: number): TranscriptSegment[] {
-  const result: TranscriptSegment[] = [];
-  
-  for (const segment of segments) {
-    const chunks = splitTextIntoChunks(segment.text, maxLineLength);
-    
-    if (chunks.length === 1) {
+      // Fallback: merge with following segment
+      if (i < segments.length - 1) {
+        const nextSegment = segments[i + 1];
+        segments[i + 1] = {
+          text: segment.text + ' ' + nextSegment.text,
+          start: segment.start,
+          end: nextSegment.end,
+        };
+        continue;
+      }
+
+      // No merge possible, keep as-is
       result.push(segment);
-    } else if (segment.words && segment.words.length > 0) {
-      // Use word-level timing for accurate splits
-      const wordTimedChunks = splitWithWordTiming(segment.words, chunks);
-      result.push(...wordTimedChunks);
     } else {
-      // Fallback: proportional timing if no word-level data
-      const totalDuration = segment.endTime - segment.startTime;
-      const durationPerChunk = totalDuration / chunks.length;
-      
-      chunks.forEach((chunk, i) => {
-        result.push({
-          startTime: segment.startTime + (i * durationPerChunk),
-          endTime: segment.startTime + ((i + 1) * durationPerChunk),
-          text: chunk
-        });
-      });
+      result.push(segment);
     }
   }
-  
+
   return result;
 }
 
-// Split using word-level timing - each chunk gets timing from its first/last word
-function splitWithWordTiming(words: WordTiming[], chunks: string[]): TranscriptSegment[] {
-  const result: TranscriptSegment[] = [];
-  let wordIndex = 0;
-  
-  for (const chunk of chunks) {
-    const chunkWords = chunk.split(/\s+/).filter(w => w.length > 0);
-    const chunkWordCount = chunkWords.length;
-    
-    if (chunkWordCount === 0) continue;
-    
-    // Find matching words in the word timing array
-    const startWordIndex = wordIndex;
-    const endWordIndex = Math.min(wordIndex + chunkWordCount - 1, words.length - 1);
-    
-    // Ensure we don't go out of bounds
-    if (startWordIndex >= words.length) {
-      // Fallback: use last word's timing
-      const lastWord = words[words.length - 1];
-      result.push({
-        startTime: lastWord.start,
-        endTime: lastWord.end,
-        text: chunk,
-      });
+// Main function: Process all words from all segments into properly timed captions
+function buildCaptionSegments(
+  segments: TranscriptSegment[],
+  maxLength: number
+): CaptionSegment[] {
+  // First, collect all words from all segments
+  const allWords: WordTiming[] = [];
+
+  for (const segment of segments) {
+    if (segment.words && segment.words.length > 0) {
+      allWords.push(...segment.words);
     } else {
-      result.push({
-        startTime: words[startWordIndex].start,
-        endTime: words[endWordIndex].end,
-        text: chunk,
-      });
+      // Estimate word timings if not available
+      const estimated = estimateWordTimings(segment.text, segment.startTime, segment.endTime);
+      allWords.push(...estimated);
     }
-    
-    wordIndex += chunkWordCount;
   }
-  
-  return result;
+
+  if (allWords.length === 0) return [];
+
+  // Process words into segments respecting rules
+  const rawSegments = processWordsIntoSegments(allWords, maxLength);
+
+  // Apply anti-orphan logic
+  const finalSegments = applyAntiOrphanLogic(rawSegments);
+
+  return finalSegments;
+}
+
+// Convert CaptionSegment array to TranscriptSegment array
+function captionsToTranscriptSegments(captions: CaptionSegment[]): TranscriptSegment[] {
+  return captions.map(cap => ({
+    startTime: cap.start,
+    endTime: cap.end,
+    text: cap.text,
+  }));
 }
 
 // Clamp segments to audio duration
@@ -694,8 +702,9 @@ export function generateSRT(segments: TranscriptSegment[], audioDuration?: numbe
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
   };
   
-  // Apply character line limit splitting
-  let processedSegments = splitLongSegments(segments, maxLineLength);
+  // Build caption segments using word-level timing and strict rules
+  const captionSegments = buildCaptionSegments(segments, maxLineLength);
+  let processedSegments = captionsToTranscriptSegments(captionSegments);
   
   // Clamp to audio duration if provided
   if (audioDuration !== undefined && audioDuration > 0) {
