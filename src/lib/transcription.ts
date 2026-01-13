@@ -89,6 +89,36 @@ export function resetTranscriber(): void {
   currentModelId = null;
 }
 
+// Estimate word-level timings by distributing duration proportionally across words
+function estimateWordTimings(text: string, startTime: number, endTime: number): WordTiming[] {
+  const words = text.split(/\s+/).filter(w => w.length > 0);
+  if (words.length === 0) return [];
+  
+  const totalDuration = endTime - startTime;
+  
+  // Calculate total character count for proportional distribution
+  const totalChars = words.reduce((sum, w) => sum + w.length, 0);
+  
+  const result: WordTiming[] = [];
+  let currentTime = startTime;
+  
+  for (const word of words) {
+    // Duration proportional to word length
+    const wordDuration = (word.length / totalChars) * totalDuration;
+    const wordEnd = currentTime + wordDuration;
+    
+    result.push({
+      word,
+      start: currentTime,
+      end: wordEnd,
+    });
+    
+    currentTime = wordEnd;
+  }
+  
+  return result;
+}
+
 // Add inaudible noise to prevent silence detection
 // Noise amplitude is ~0.001 (-60dB), imperceptible to human ears
 async function addInaudibleNoise(audioBuffer: ArrayBuffer): Promise<Blob> {
@@ -220,9 +250,9 @@ export async function transcribeAudio(
   try {
     onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
-    // Request word-level timestamps for accurate caption splitting
+    // Use chunk-level timestamps (word-level not supported by all ONNX models)
     const result = await transcriber!(audioUrl, {
-      return_timestamps: 'word', // Get word-level timestamps
+      return_timestamps: true,
       chunk_length_s: 30,
       stride_length_s: 5,
     }) as AutomaticSpeechRecognitionOutput;
@@ -234,34 +264,34 @@ export async function transcribeAudio(
     const segments: TranscriptSegment[] = [];
     
     if (result.chunks && Array.isArray(result.chunks)) {
-      // Word-level timestamps: each chunk is a word
-      const wordTimings: WordTiming[] = [];
-      
       for (const chunk of result.chunks) {
         if (chunk.timestamp && Array.isArray(chunk.timestamp)) {
           const [start, end] = chunk.timestamp;
-          const word = chunk.text?.trim() || '';
-          if (word) {
-            wordTimings.push({
-              word,
-              start: typeof start === 'number' ? start : 0,
-              end: typeof end === 'number' ? end : (typeof start === 'number' ? start + 0.5 : 0.5),
+          const text = chunk.text?.trim() || '';
+          if (text) {
+            const startTime = typeof start === 'number' ? start : 0;
+            const endTime = typeof end === 'number' ? end : (startTime + 2);
+            
+            // Generate word-level timing estimates from chunk
+            const words = estimateWordTimings(text, startTime, endTime);
+            
+            segments.push({
+              startTime,
+              endTime,
+              text,
+              words,
             });
           }
         }
       }
-      
-      if (wordTimings.length > 0) {
-        // Group words into segments (sentences or natural breaks)
-        const groupedSegments = groupWordsIntoSegments(wordTimings);
-        segments.push(...groupedSegments);
-      }
     } else if (result.text) {
-      // Fallback: no word-level timestamps available
+      // Fallback: no timestamps available
+      const words = estimateWordTimings(result.text.trim(), 0, 30);
       segments.push({
         startTime: 0,
         endTime: 30,
-        text: result.text.trim()
+        text: result.text.trim(),
+        words,
       });
     }
     
