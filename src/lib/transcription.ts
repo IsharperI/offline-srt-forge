@@ -1,9 +1,16 @@
 import { pipeline, type AutomaticSpeechRecognitionOutput } from "@huggingface/transformers";
 
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface TranscriptSegment {
   startTime: number;
   endTime: number;
   text: string;
+  words?: WordTiming[]; // Word-level timing for accurate splitting
 }
 
 export interface TranscriptionProgress {
@@ -213,8 +220,9 @@ export async function transcribeAudio(
   try {
     onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
+    // Request word-level timestamps for accurate caption splitting
     const result = await transcriber!(audioUrl, {
-      return_timestamps: true,
+      return_timestamps: 'word', // Get word-level timestamps
       chunk_length_s: 30,
       stride_length_s: 5,
     }) as AutomaticSpeechRecognitionOutput;
@@ -226,17 +234,30 @@ export async function transcribeAudio(
     const segments: TranscriptSegment[] = [];
     
     if (result.chunks && Array.isArray(result.chunks)) {
+      // Word-level timestamps: each chunk is a word
+      const wordTimings: WordTiming[] = [];
+      
       for (const chunk of result.chunks) {
         if (chunk.timestamp && Array.isArray(chunk.timestamp)) {
           const [start, end] = chunk.timestamp;
-          segments.push({
-            startTime: typeof start === 'number' ? start : 0,
-            endTime: typeof end === 'number' ? end : (typeof start === 'number' ? start + 2 : 2),
-            text: chunk.text?.trim() || ''
-          });
+          const word = chunk.text?.trim() || '';
+          if (word) {
+            wordTimings.push({
+              word,
+              start: typeof start === 'number' ? start : 0,
+              end: typeof end === 'number' ? end : (typeof start === 'number' ? start + 0.5 : 0.5),
+            });
+          }
         }
       }
+      
+      if (wordTimings.length > 0) {
+        // Group words into segments (sentences or natural breaks)
+        const groupedSegments = groupWordsIntoSegments(wordTimings);
+        segments.push(...groupedSegments);
+      }
     } else if (result.text) {
+      // Fallback: no word-level timestamps available
       segments.push({
         startTime: 0,
         endTime: 30,
@@ -368,6 +389,41 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
 const DEFAULT_MAX_LINE_LENGTH = 80;
 const MIN_WORDS_PER_CAPTION = 3;
 const MIN_WORDS_ABSOLUTE = 2; // Caption must always have more than 1 word
+
+// Group words into natural segments (sentences/phrases) while preserving word timings
+function groupWordsIntoSegments(words: WordTiming[]): TranscriptSegment[] {
+  if (words.length === 0) return [];
+  
+  const segments: TranscriptSegment[] = [];
+  let currentWords: WordTiming[] = [];
+  
+  for (const word of words) {
+    currentWords.push(word);
+    
+    // Check if this word ends a sentence
+    if (/[.!?]$/.test(word.word)) {
+      segments.push({
+        startTime: currentWords[0].start,
+        endTime: currentWords[currentWords.length - 1].end,
+        text: currentWords.map(w => w.word).join(' '),
+        words: [...currentWords],
+      });
+      currentWords = [];
+    }
+  }
+  
+  // Push remaining words as final segment
+  if (currentWords.length > 0) {
+    segments.push({
+      startTime: currentWords[0].start,
+      endTime: currentWords[currentWords.length - 1].end,
+      text: currentWords.map(w => w.word).join(' '),
+      words: [...currentWords],
+    });
+  }
+  
+  return segments;
+}
 
 // Split text by sentences (. ! ?) while preserving the delimiters
 function splitBySentences(text: string): string[] {
@@ -516,7 +572,7 @@ function splitTextIntoChunks(text: string, maxLength: number): string[] {
   return ensureMinWords(allChunks);
 }
 
-// Split segments that exceed max characters with proportional timestamps
+// Split segments that exceed max characters using word-level timestamps
 function splitLongSegments(segments: TranscriptSegment[], maxLineLength: number): TranscriptSegment[] {
   const result: TranscriptSegment[] = [];
   
@@ -525,8 +581,12 @@ function splitLongSegments(segments: TranscriptSegment[], maxLineLength: number)
     
     if (chunks.length === 1) {
       result.push(segment);
+    } else if (segment.words && segment.words.length > 0) {
+      // Use word-level timing for accurate splits
+      const wordTimedChunks = splitWithWordTiming(segment.words, chunks);
+      result.push(...wordTimedChunks);
     } else {
-      // Split timestamp proportionally across chunks
+      // Fallback: proportional timing if no word-level data
       const totalDuration = segment.endTime - segment.startTime;
       const durationPerChunk = totalDuration / chunks.length;
       
@@ -538,6 +598,44 @@ function splitLongSegments(segments: TranscriptSegment[], maxLineLength: number)
         });
       });
     }
+  }
+  
+  return result;
+}
+
+// Split using word-level timing - each chunk gets timing from its first/last word
+function splitWithWordTiming(words: WordTiming[], chunks: string[]): TranscriptSegment[] {
+  const result: TranscriptSegment[] = [];
+  let wordIndex = 0;
+  
+  for (const chunk of chunks) {
+    const chunkWords = chunk.split(/\s+/).filter(w => w.length > 0);
+    const chunkWordCount = chunkWords.length;
+    
+    if (chunkWordCount === 0) continue;
+    
+    // Find matching words in the word timing array
+    const startWordIndex = wordIndex;
+    const endWordIndex = Math.min(wordIndex + chunkWordCount - 1, words.length - 1);
+    
+    // Ensure we don't go out of bounds
+    if (startWordIndex >= words.length) {
+      // Fallback: use last word's timing
+      const lastWord = words[words.length - 1];
+      result.push({
+        startTime: lastWord.start,
+        endTime: lastWord.end,
+        text: chunk,
+      });
+    } else {
+      result.push({
+        startTime: words[startWordIndex].start,
+        endTime: words[endWordIndex].end,
+        text: chunk,
+      });
+    }
+    
+    wordIndex += chunkWordCount;
   }
   
   return result;
