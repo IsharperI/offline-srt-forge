@@ -113,17 +113,16 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
       return;
     }
     
-    // Auto-correct the edited text
-    const result = autoCorrect(editText.trim());
-    
+    // Save user's edited text as-is (no auto-correct on manual edits)
+    // Clear corrections since user has manually reviewed/edited
     setSegments(prev => prev.map((seg, i) => 
       i === editingIndex
         ? { 
             ...seg, 
-            text: result.correctedText, 
+            text: editText.trim(), 
             startTime, 
             endTime,
-            corrections: result.corrections,
+            corrections: [], // Clear highlights after manual edit
           }
         : seg
     ));
