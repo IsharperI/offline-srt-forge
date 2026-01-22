@@ -350,7 +350,7 @@ const Index = () => {
                   className="gap-2"
                 >
                   <Download className="w-4 h-4" />
-                  Export All ({completedFiles.length})
+                  Download All ({completedFiles.length})
                 </Button>
               )}
             </div>
