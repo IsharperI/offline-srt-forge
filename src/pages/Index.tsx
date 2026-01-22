@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { AudioWaveform, Shield, Zap, Download } from 'lucide-react';
+import { AudioWaveform, Shield, Zap, Download, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
@@ -197,6 +197,12 @@ const Index = () => {
     setReviewFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
+  const handleGenerateAll = useCallback(() => {
+    reviewFiles.forEach(file => {
+      handleGenerateSRT(file.id, file.segments);
+    });
+  }, [reviewFiles, handleGenerateSRT]);
+
   const handleDownload = (file: ProcessedFileData) => {
     downloadSRT(file.srtContent, file.filename);
   };
@@ -320,9 +326,22 @@ const Index = () => {
         {/* Review/Edit Section */}
         {reviewFiles.length > 0 && (
           <div className="space-y-3 mb-6">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-              Review & Edit
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                Review & Edit
+              </h2>
+              {reviewFiles.length > 1 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateAll}
+                  className="gap-2"
+                >
+                  <FileText className="w-4 h-4" />
+                  Generate All ({reviewFiles.length})
+                </Button>
+              )}
+            </div>
             {reviewFiles.map(file => (
               <CaptionEditor
                 key={file.id}
