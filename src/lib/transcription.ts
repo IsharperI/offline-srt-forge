@@ -30,13 +30,8 @@ export async function initializeTranscriber(
   onProgress?: (progress: TranscriptionProgress) => void,
   modelId: string = DEFAULT_MODEL
 ): Promise<void> {
-  // If we already have a transcriber for this model, skip
   if (transcriber && currentModelId === modelId) return;
-  
-  // If loading is in progress, wait
   if (isLoading) return;
-  
-  // If switching models, reset the transcriber
   if (currentModelId !== modelId) {
     transcriber = null;
     currentModelId = null;
@@ -62,7 +57,6 @@ export async function initializeTranscriber(
       }
     );
     
-    // Validate that we got a callable function
     if (typeof result !== 'function') {
       console.error('Pipeline returned non-function:', typeof result, result);
       throw new Error('Model failed to initialize properly');
@@ -89,38 +83,26 @@ export function resetTranscriber(): void {
   currentModelId = null;
 }
 
-// Estimate word-level timings by distributing duration proportionally across words
 function estimateWordTimings(text: string, startTime: number, endTime: number): WordTiming[] {
   const words = text.split(/\s+/).filter(w => w.length > 0);
   if (words.length === 0) return [];
   
   const totalDuration = endTime - startTime;
-  
-  // Calculate total character count for proportional distribution
   const totalChars = words.reduce((sum, w) => sum + w.length, 0);
   
   const result: WordTiming[] = [];
   let currentTime = startTime;
   
   for (const word of words) {
-    // Duration proportional to word length
     const wordDuration = (word.length / totalChars) * totalDuration;
     const wordEnd = currentTime + wordDuration;
-    
-    result.push({
-      word,
-      start: currentTime,
-      end: wordEnd,
-    });
-    
+    result.push({ word, start: currentTime, end: wordEnd });
     currentTime = wordEnd;
   }
   
   return result;
 }
 
-// Add inaudible noise to prevent silence detection
-// Noise amplitude is ~0.001 (-60dB), imperceptible to human ears
 async function addInaudibleNoise(audioBuffer: ArrayBuffer): Promise<Blob> {
   const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
   
@@ -130,37 +112,29 @@ async function addInaudibleNoise(audioBuffer: ArrayBuffer): Promise<Blob> {
     const sampleRate = decodedAudio.sampleRate;
     const length = decodedAudio.length;
     
-    // Create offline context for processing
     const offlineContext = new OfflineAudioContext(numberOfChannels, length, sampleRate);
-    
-    // Copy and add noise to each channel
     const outputBuffer = offlineContext.createBuffer(numberOfChannels, length, sampleRate);
     
     for (let channel = 0; channel < numberOfChannels; channel++) {
       const inputData = decodedAudio.getChannelData(channel);
       const outputData = outputBuffer.getChannelData(channel);
-      
       for (let i = 0; i < length; i++) {
-        // Add very low amplitude noise (-60dB, ~0.001 amplitude)
         const noise = (Math.random() * 2 - 1) * 0.001;
         outputData[i] = inputData[i] + noise;
       }
     }
     
-    // Encode to WAV
     return encodeWAV(outputBuffer);
   } finally {
     await audioContext.close();
   }
 }
 
-// Encode AudioBuffer to WAV Blob
 function encodeWAV(audioBuffer: AudioBuffer): Blob {
   const numberOfChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
   const length = audioBuffer.length;
   
-  // Interleave channels
   const interleaved = new Float32Array(length * numberOfChannels);
   for (let channel = 0; channel < numberOfChannels; channel++) {
     const channelData = audioBuffer.getChannelData(channel);
@@ -169,11 +143,9 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
     }
   }
   
-  // Convert to 16-bit PCM
   const buffer = new ArrayBuffer(44 + interleaved.length * 2);
   const view = new DataView(buffer);
   
-  // WAV header
   const writeString = (offset: number, str: string) => {
     for (let i = 0; i < str.length; i++) {
       view.setUint8(offset + i, str.charCodeAt(i));
@@ -184,17 +156,16 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
   view.setUint32(4, 36 + interleaved.length * 2, true);
   writeString(8, 'WAVE');
   writeString(12, 'fmt ');
-  view.setUint32(16, 16, true); // Subchunk1Size
-  view.setUint16(20, 1, true); // AudioFormat (PCM)
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
   view.setUint16(22, numberOfChannels, true);
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * numberOfChannels * 2, true); // ByteRate
-  view.setUint16(32, numberOfChannels * 2, true); // BlockAlign
-  view.setUint16(34, 16, true); // BitsPerSample
+  view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+  view.setUint16(32, numberOfChannels * 2, true);
+  view.setUint16(34, 16, true);
   writeString(36, 'data');
   view.setUint32(40, interleaved.length * 2, true);
   
-  // Write samples
   let offset = 44;
   for (let i = 0; i < interleaved.length; i++) {
     const sample = Math.max(-1, Math.min(1, interleaved[i]));
@@ -212,9 +183,8 @@ export async function transcribeAudio(
 ): Promise<TranscriptSegment[]> {
   const targetModel = modelId || 'onnx-community/whisper-tiny.en';
   
-  // Ensure transcriber is initialized and valid for the correct model
   if (!transcriber || typeof transcriber !== 'function' || currentModelId !== targetModel) {
-    transcriber = null; // Reset if invalid or different model
+    transcriber = null;
     await initializeTranscriber(onProgress, targetModel);
   }
   
@@ -224,7 +194,6 @@ export async function transcribeAudio(
   
   onProgress?.({ status: 'transcribing', progress: 0, message: 'Processing audio...' });
   
-  // Convert file to ArrayBuffer
   const arrayBuffer = await audioFile.arrayBuffer();
   
   if (arrayBuffer.byteLength === 0) {
@@ -235,7 +204,6 @@ export async function transcribeAudio(
   
   onProgress?.({ status: 'transcribing', progress: 5, message: 'Adding noise floor...' });
   
-  // Add inaudible noise to prevent silence detection
   let processedBlob: Blob;
   try {
     processedBlob = await addInaudibleNoise(arrayBuffer);
@@ -250,7 +218,6 @@ export async function transcribeAudio(
   try {
     onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
-    // Use chunk-level timestamps (word-level not supported by all ONNX models)
     const result = await transcriber!(audioUrl, {
       return_timestamps: true,
       chunk_length_s: 30,
@@ -271,28 +238,14 @@ export async function transcribeAudio(
           if (text) {
             const startTime = typeof start === 'number' ? start : 0;
             const endTime = typeof end === 'number' ? end : (startTime + 2);
-            
-            // Generate word-level timing estimates from chunk
             const words = estimateWordTimings(text, startTime, endTime);
-            
-            segments.push({
-              startTime,
-              endTime,
-              text,
-              words,
-            });
+            segments.push({ startTime, endTime, text, words });
           }
         }
       }
     } else if (result.text) {
-      // Fallback: no timestamps available
       const words = estimateWordTimings(result.text.trim(), 0, 30);
-      segments.push({
-        startTime: 0,
-        endTime: 30,
-        text: result.text.trim(),
-        words,
-      });
+      segments.push({ startTime: 0, endTime: 30, text: result.text.trim(), words });
     }
     
     if (segments.length === 0) {
@@ -300,7 +253,6 @@ export async function transcribeAudio(
     }
     
     onProgress?.({ status: 'complete', progress: 100, message: 'Transcription complete' });
-    
     return segments;
   } catch (error) {
     console.error('Transcription error details:', error);
@@ -312,7 +264,6 @@ export async function transcribeAudio(
 
 // Step B: Sanitization Layer
 export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
-  // Comprehensive silence patterns - catches all known variants
   const silencePatterns = [
     /^\s*\[silence\.?\]\s*$/i,
     /^\s*\(silence\.?\)\s*$/i,
@@ -330,11 +281,10 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
     /^\s*\(applause\.?\)\s*$/i,
     /^\s*\[laughter\.?\]\s*$/i,
     /^\s*\(laughter\.?\)\s*$/i,
-    /^\s*\.\s*$/,  // Just a period
-    /^\s*$/,  // Empty or whitespace only
+    /^\s*\.\s*$/,
+    /^\s*$/,
   ];
   
-  // Patterns to clean from mixed content
   const cleanPatterns = [
     /\[silence\.?\]/gi,
     /\(silence\.?\)/gi,
@@ -363,7 +313,6 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
     for (const pattern of cleanPatterns) {
       cleaned = cleaned.replace(pattern, '').trim();
     }
-    // Clean up multiple spaces
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
     return cleaned;
   };
@@ -373,12 +322,8 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     
-    // Check if this is a silence-only segment
     if (isSilenceOnly(segment.text)) {
-      // If there's a previous segment and a next non-silence segment
-      // Extend the previous segment's endTime
       if (result.length > 0) {
-        // Find next non-silence segment
         let nextNonSilenceIndex = -1;
         for (let j = i + 1; j < segments.length; j++) {
           if (!isSilenceOnly(segments[j].text)) {
@@ -386,23 +331,15 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
             break;
           }
         }
-        
         if (nextNonSilenceIndex !== -1) {
-          // Extend previous segment to the start of next non-silence segment
           result[result.length - 1].endTime = segments[nextNonSilenceIndex].startTime;
         }
       }
-      // Skip this silence segment
       continue;
     }
     
-    // Clean mixed content
     const cleanedText = cleanMixedContent(segment.text);
-    
-    // Skip if cleaning resulted in empty text
-    if (!cleanedText) {
-      continue;
-    }
+    if (!cleanedText) continue;
     
     result.push({
       startTime: segment.startTime,
@@ -414,10 +351,13 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
   return result;
 }
 
-// Step C: Re-indexing (handled during SRT generation)
+// ==========================================
+// Step C: Caption Segmentation & SRT Generation
+// ==========================================
 
 const DEFAULT_MAX_LINE_LENGTH = 80;
 const MIN_WORDS_PER_SEGMENT = 3;
+const SOFT_BREAK_THRESHOLD = 45;
 
 // Conjunctions and prepositions to break BEFORE
 const BREAK_BEFORE_WORDS = new Set([
@@ -448,9 +388,9 @@ function endsSentence(word: string): boolean {
   return /[.!?]$/.test(word);
 }
 
-// Check if a word ends with a comma
-function endsWithComma(word: string): boolean {
-  return /,$/.test(word);
+// Check if a word ends with a clause break (comma, semicolon, or dash)
+function endsWithClauseBreak(word: string): boolean {
+  return /[,;]$/.test(word) || word.endsWith('--') || /[^-]-$/.test(word);
 }
 
 // Check if text is a standalone interjection
@@ -459,62 +399,129 @@ function isStandaloneInterjection(text: string): boolean {
   return STANDALONE_INTERJECTIONS.has(normalized);
 }
 
-// Find the best break point within a word range
+// Check if a word is a conjunction/preposition (for orphan check)
+function isPrepositionOrConjunction(word: string): boolean {
+  return BREAK_BEFORE_WORDS.has(word.toLowerCase().replace(/[.,!?;:]+$/, ''));
+}
+
+// Calculate the text length for a range of words
+function wordsTextLength(words: WordTiming[], startIdx: number, endIdx: number): number {
+  let len = 0;
+  for (let i = startIdx; i <= endIdx; i++) {
+    if (i > startIdx) len += 1; // space
+    len += words[i].word.length;
+  }
+  return len;
+}
+
+interface BreakCandidate {
+  index: number; // the index at which the segment ends
+  priority: number; // 1 = punctuation (highest), 2 = clause, 3 = conjunction
+}
+
+// Find the best break point using semantic priority + balance scoring
 function findBestBreakPoint(
   words: WordTiming[],
   startIdx: number,
-  endIdx: number,
   maxLength: number
 ): number {
+  const candidates: BreakCandidate[] = [];
   let currentLength = 0;
-  let lastGoodBreak = startIdx;
-  let lastPunctuationBreak = -1;
-  let lastCommaBreak = -1;
-  let lastConjunctionBreak = -1;
 
-  for (let i = startIdx; i <= endIdx; i++) {
-    const word = words[i].word;
-    const addLength = (i === startIdx ? 0 : 1) + word.length; // +1 for space
+  for (let i = startIdx; i < words.length; i++) {
+    const addLength = (i === startIdx ? 0 : 1) + words[i].word.length;
 
-    // Check if adding this word exceeds max length
     if (currentLength + addLength > maxLength && i > startIdx) {
-      // Return the best break point found
-      if (lastPunctuationBreak >= startIdx + MIN_WORDS_PER_SEGMENT - 1) {
-        return lastPunctuationBreak + 1;
-      }
-      if (lastCommaBreak >= startIdx + MIN_WORDS_PER_SEGMENT - 1) {
-        return lastCommaBreak + 1;
-      }
-      if (lastConjunctionBreak >= startIdx + MIN_WORDS_PER_SEGMENT - 1) {
-        return lastConjunctionBreak;
-      }
-      // Fallback: break at current position if we have minimum words
-      if (i - startIdx >= MIN_WORDS_PER_SEGMENT) {
-        return i;
-      }
-      // Keep going to ensure minimum words
-      lastGoodBreak = i;
+      break;
     }
 
     currentLength += addLength;
+    const wordCount = i - startIdx + 1;
 
-    // Track potential break points
-    if (endsSentence(word)) {
-      lastPunctuationBreak = i;
+    if (wordCount < MIN_WORDS_PER_SEGMENT) continue;
+
+    // Priority 1: Sentence-ending punctuation
+    if (endsSentence(words[i].word)) {
+      candidates.push({ index: i, priority: 1 });
     }
-    if (endsWithComma(word)) {
-      lastCommaBreak = i;
+    // Priority 2: Clause breaks (comma, semicolon, dash)
+    else if (endsWithClauseBreak(words[i].word)) {
+      candidates.push({ index: i, priority: 2 });
     }
-    // Check if NEXT word is a conjunction/preposition
-    if (i < endIdx && BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?]$/, ''))) {
-      lastConjunctionBreak = i + 1;
+    // Priority 3: Before a conjunction/preposition (only after SOFT_BREAK_THRESHOLD)
+    else if (
+      i + 1 < words.length &&
+      BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?;:]+$/, '')) &&
+      currentLength >= SOFT_BREAK_THRESHOLD
+    ) {
+      candidates.push({ index: i, priority: 3 });
     }
   }
 
-  return endIdx + 1;
+  // No candidates: break at last word that fits
+  if (candidates.length === 0) {
+    let lastFit = startIdx;
+    let len = 0;
+    for (let i = startIdx; i < words.length; i++) {
+      const addLen = (i === startIdx ? 0 : 1) + words[i].word.length;
+      if (len + addLen > maxLength && i > startIdx) break;
+      len += addLen;
+      lastFit = i;
+    }
+    return lastFit;
+  }
+
+  const bestPriority = Math.min(...candidates.map(c => c.priority));
+
+  // For sentence-ending punctuation, take the last one (complete the sentence)
+  if (bestPriority === 1) {
+    const punctuationCandidates = candidates.filter(c => c.priority === 1);
+    return punctuationCandidates[punctuationCandidates.length - 1].index;
+  }
+
+  // For clause/conjunction breaks, apply balance scoring
+  const samePriorityCandidates = candidates.filter(c => c.priority === bestPriority);
+
+  // Look ahead ~2 segments for balance scoring
+  let totalFitEnd = startIdx;
+  let totalFitLength = 0;
+  for (let i = startIdx; i < words.length; i++) {
+    const addLen = (i === startIdx ? 0 : 1) + words[i].word.length;
+    if (totalFitLength + addLen > maxLength * 2) break;
+    totalFitLength += addLen;
+    totalFitEnd = i;
+  }
+
+  let bestCandidate = samePriorityCandidates[0];
+  let bestBalanceScore = Infinity;
+
+  for (const candidate of samePriorityCandidates) {
+    const firstLen = wordsTextLength(words, startIdx, candidate.index);
+    const secondLen = wordsTextLength(words, candidate.index + 1, totalFitEnd);
+    const imbalance = Math.abs(firstLen - secondLen);
+
+    if (imbalance < bestBalanceScore) {
+      bestBalanceScore = imbalance;
+      bestCandidate = candidate;
+    }
+  }
+
+  // Anti-orphan: if segment ends with a lone preposition, pull it to next segment
+  let breakIdx = bestCandidate.index;
+  if (
+    breakIdx > startIdx &&
+    isPrepositionOrConjunction(words[breakIdx].word) &&
+    !endsWithClauseBreak(words[breakIdx].word) &&
+    !endsSentence(words[breakIdx].word) &&
+    (breakIdx - 1 - startIdx + 1) >= MIN_WORDS_PER_SEGMENT
+  ) {
+    breakIdx = breakIdx - 1;
+  }
+
+  return breakIdx;
 }
 
-// Process words into caption segments with proper timing
+// Process words into caption segments with semantic break rules
 function processWordsIntoSegments(
   words: WordTiming[],
   maxLength: number
@@ -525,57 +532,46 @@ function processWordsIntoSegments(
   let currentStart = 0;
 
   while (currentStart < words.length) {
-    // Build text from current position to find where we need to break
-    let currentText = '';
-    let sentenceEndIdx = -1;
-    let potentialEnd = words.length - 1;
-
-    // First, try to find a sentence end within limits
-    for (let i = currentStart; i < words.length; i++) {
-      const word = words[i].word;
-      const testText = currentText + (currentText ? ' ' : '') + word;
-
-      if (endsSentence(word)) {
-        if (testText.length <= maxLength) {
-          sentenceEndIdx = i;
-        } else if (sentenceEndIdx === -1) {
-          // Sentence is too long, need to break before end
-          break;
-        }
-      }
-
-      if (testText.length > maxLength && i > currentStart) {
-        potentialEnd = i - 1;
-        break;
-      }
-
-      currentText = testText;
-      potentialEnd = i;
+    // Quick check: can all remaining words fit?
+    const remainingLength = wordsTextLength(words, currentStart, words.length - 1);
+    if (remainingLength <= maxLength) {
+      const segmentWords = words.slice(currentStart);
+      segments.push({
+        text: segmentWords.map(w => w.word).join(' '),
+        start: segmentWords[0].start,
+        end: segmentWords[segmentWords.length - 1].end,
+      });
+      break;
     }
 
-    // Determine the actual end of this segment
+    // Scan for the FIRST sentence-ending punctuation within maxLength
+    let firstSentenceEnd = -1;
+    let scanLength = 0;
+    for (let i = currentStart; i < words.length; i++) {
+      const addLen = (i === currentStart ? 0 : 1) + words[i].word.length;
+      if (scanLength + addLen > maxLength) break;
+      scanLength += addLen;
+
+      if (endsSentence(words[i].word) && (i - currentStart + 1) >= MIN_WORDS_PER_SEGMENT) {
+        firstSentenceEnd = i;
+        break; // Take the first sentence end — one sentence per caption
+      }
+    }
+
     let segmentEnd: number;
 
-    if (sentenceEndIdx >= currentStart && words.slice(currentStart, sentenceEndIdx + 1).map(w => w.word).join(' ').length <= maxLength) {
-      // Complete sentence fits
-      segmentEnd = sentenceEndIdx;
+    if (firstSentenceEnd >= 0) {
+      segmentEnd = firstSentenceEnd;
     } else {
-      // Need to find best break point
-      segmentEnd = findBestBreakPoint(words, currentStart, potentialEnd, maxLength) - 1;
-      if (segmentEnd < currentStart) segmentEnd = currentStart;
+      // No sentence-ending punctuation within limit — use semantic break finding
+      segmentEnd = findBestBreakPoint(words, currentStart, maxLength);
     }
 
-    // Ensure we have at least one word
-    if (segmentEnd < currentStart) {
-      segmentEnd = currentStart;
-    }
+    if (segmentEnd < currentStart) segmentEnd = currentStart;
 
-    // Create segment
     const segmentWords = words.slice(currentStart, segmentEnd + 1);
-    const text = segmentWords.map(w => w.word).join(' ');
-
     segments.push({
-      text,
+      text: segmentWords.map(w => w.word).join(' '),
       start: segmentWords[0].start,
       end: segmentWords[segmentWords.length - 1].end,
     });
@@ -596,7 +592,6 @@ function applyAntiOrphanLogic(segments: CaptionSegment[]): CaptionSegment[] {
     const segment = segments[i];
     const wordCount = segment.text.split(/\s+/).filter(w => w.length > 0).length;
 
-    // Check if this segment has fewer than 3 words
     if (wordCount < MIN_WORDS_PER_SEGMENT) {
       // Exception: standalone interjections should not be merged
       if (isStandaloneInterjection(segment.text)) {
@@ -610,7 +605,6 @@ function applyAntiOrphanLogic(segments: CaptionSegment[]): CaptionSegment[] {
         const prevEndsWithPeriod = /\.\s*$/.test(prevSegment.text);
 
         if (!prevEndsWithPeriod) {
-          // Merge with previous
           result[result.length - 1] = {
             text: prevSegment.text + ' ' + segment.text,
             start: prevSegment.start,
@@ -631,7 +625,6 @@ function applyAntiOrphanLogic(segments: CaptionSegment[]): CaptionSegment[] {
         continue;
       }
 
-      // No merge possible, keep as-is
       result.push(segment);
     } else {
       result.push(segment);
@@ -646,14 +639,12 @@ function buildCaptionSegments(
   segments: TranscriptSegment[],
   maxLength: number
 ): CaptionSegment[] {
-  // First, collect all words from all segments
   const allWords: WordTiming[] = [];
 
   for (const segment of segments) {
     if (segment.words && segment.words.length > 0) {
       allWords.push(...segment.words);
     } else {
-      // Estimate word timings if not available
       const estimated = estimateWordTimings(segment.text, segment.startTime, segment.endTime);
       allWords.push(...estimated);
     }
@@ -661,10 +652,7 @@ function buildCaptionSegments(
 
   if (allWords.length === 0) return [];
 
-  // Process words into segments respecting rules
   const rawSegments = processWordsIntoSegments(allWords, maxLength);
-
-  // Apply anti-orphan logic
   const finalSegments = applyAntiOrphanLogic(rawSegments);
 
   return finalSegments;
@@ -682,13 +670,13 @@ function captionsToTranscriptSegments(captions: CaptionSegment[]): TranscriptSeg
 // Clamp segments to audio duration
 function clampSegmentsToDuration(segments: TranscriptSegment[], maxDuration: number): TranscriptSegment[] {
   return segments
-    .filter(segment => segment.startTime < maxDuration) // Remove segments that start after audio ends
+    .filter(segment => segment.startTime < maxDuration)
     .map(segment => ({
       ...segment,
       startTime: Math.min(segment.startTime, maxDuration),
       endTime: Math.min(segment.endTime, maxDuration),
     }))
-    .filter(segment => segment.endTime > segment.startTime); // Remove zero-duration segments
+    .filter(segment => segment.endTime > segment.startTime);
 }
 
 // Generate SRT content
@@ -702,11 +690,9 @@ export function generateSRT(segments: TranscriptSegment[], audioDuration?: numbe
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
   };
   
-  // Build caption segments using word-level timing and strict rules
   const captionSegments = buildCaptionSegments(segments, maxLineLength);
   let processedSegments = captionsToTranscriptSegments(captionSegments);
   
-  // Clamp to audio duration if provided
   if (audioDuration !== undefined && audioDuration > 0) {
     processedSegments = clampSegmentsToDuration(processedSegments, audioDuration);
   }
@@ -714,7 +700,6 @@ export function generateSRT(segments: TranscriptSegment[], audioDuration?: numbe
   const lines: string[] = [];
   
   processedSegments.forEach((segment, index) => {
-    // Re-indexed numbering (Step C)
     lines.push(String(index + 1));
     lines.push(`${formatTime(segment.startTime)} --> ${formatTime(segment.endTime)}`);
     lines.push(segment.text);
