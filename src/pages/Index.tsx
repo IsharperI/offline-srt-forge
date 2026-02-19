@@ -113,7 +113,9 @@ const Index = () => {
       // Generate a helpful error message
       let errorMessage = 'Transcription failed';
       if (error instanceof Error) {
-        if (error.message.includes('empty')) {
+        if (error.message.includes('Timed out')) {
+          errorMessage = 'Processing timed out — file may be too long or corrupted';
+        } else if (error.message.includes('empty')) {
           errorMessage = 'Audio file is empty or corrupted';
         } else if (error.message.includes('decode') || error.message.includes('audio')) {
           errorMessage = 'Unable to decode audio - format may be unsupported';
