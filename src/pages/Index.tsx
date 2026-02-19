@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { AudioWaveform, Shield, Zap, Download, FileText } from 'lucide-react';
+import { AudioWaveform, Shield, Zap, Download, FileText, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
@@ -224,6 +224,10 @@ const Index = () => {
     setCompletedFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
+  const handleClearAllProcessing = () => setProcessingFiles([]);
+  const handleClearAllReview = () => setReviewFiles([]);
+  const handleClearAllCompleted = () => setCompletedFiles([]);
+
   const isProcessing = processingFiles.length > 0;
 
   return (
@@ -308,10 +312,23 @@ const Index = () => {
 
         {/* Processing Queue */}
         {processingFiles.length > 0 && (
-          <div className="space-y-3 mb-6">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-              Processing
-            </h2>
+        <div className="space-y-3 mb-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                Processing
+              </h2>
+              {processingFiles.length > 1 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClearAllProcessing}
+                  className="gap-2 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear All
+                </Button>
+              )}
+            </div>
             {processingFiles.map(file => (
               <ProcessingProgress
                 key={file.id}
@@ -330,17 +347,30 @@ const Index = () => {
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 Review & Edit
               </h2>
-              {reviewFiles.length > 1 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleGenerateAll}
-                  className="gap-2"
-                >
-                  <FileText className="w-4 h-4" />
-                  Generate All ({reviewFiles.length})
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {reviewFiles.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearAllReview}
+                    className="gap-2 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear All
+                  </Button>
+                )}
+                {reviewFiles.length > 1 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleGenerateAll}
+                    className="gap-2"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Generate All ({reviewFiles.length})
+                  </Button>
+                )}
+              </div>
             </div>
             {reviewFiles.map(file => (
               <CaptionEditor
@@ -361,17 +391,30 @@ const Index = () => {
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 Ready to Download
               </h2>
-              {completedFiles.length > 1 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleExportAll}
-                  className="gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Download All ({completedFiles.length})
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {completedFiles.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearAllCompleted}
+                    className="gap-2 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear All
+                  </Button>
+                )}
+                {completedFiles.length > 1 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportAll}
+                    className="gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download All ({completedFiles.length})
+                  </Button>
+                )}
+              </div>
             </div>
             {completedFiles.map(file => (
               <ProcessedFile
