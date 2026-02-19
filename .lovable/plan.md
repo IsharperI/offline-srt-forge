@@ -1,53 +1,40 @@
 
-# Semantic Caption Segmentation Refinement
+# Add "Clear All" Button
 
-## What Changes
+## Overview
 
-The caption segmentation logic in `src/lib/transcription.ts` will be rewritten to follow a smarter, semantic-first approach rather than simply filling lines up to the character limit.
+A "Clear All" button will be added to each section that can accumulate multiple files: **Processing**, **Review & Edit**, and **Ready to Download**. It appears only when there are 2 or more files in that section (alongside the existing individual "X" remove buttons, which are unchanged).
 
-## New Break Priority System
+## Changes — `src/pages/Index.tsx` only
 
-The current `processWordsIntoSegments` and `findBestBreakPoint` functions will be replaced with a new algorithm that follows these priorities (highest to lowest):
+### New handler functions
 
-1. **Punctuation Priority** -- Always break immediately after `.` `?` `!`, even if the segment is short (e.g., 20 characters). This ensures each sentence gets its own caption block.
+Three new handlers will be added, one per section:
 
-2. **Clause Breaks** -- For long sentences without terminal punctuation yet, prefer breaking after commas `,`, semicolons `;`, or dashes `--`/`-`.
+- `handleClearAllProcessing` — sets `processingFiles` to `[]`
+- `handleClearAllReview` — sets `reviewFiles` to `[]`
+- `handleClearAllCompleted` — sets `completedFiles` to `[]`
 
-3. **Logical Conjunctions** -- If no punctuation break is available and the text exceeds ~45-50 characters, break before conjunctions (`and`, `but`, `or`, `so`) or prepositions (`to`, `for`, `with`, `on`, etc.).
+### UI additions
 
-4. **Balance Rule** -- When a sentence must be split and multiple break points are available, choose the one that produces the most balanced segment lengths (closest to 50/50 split) rather than maximizing the first segment.
+Each section header row (which already uses `flex items-center justify-between`) gets a "Clear All" button on the right side, displayed only when the section has more than 1 file.
 
-5. **No Orphans** -- A caption line must never end with a single dangling word or a lone preposition. The 3-word minimum rule and standalone interjection exceptions remain unchanged.
+**Processing section** — sits next to the existing "Processing" heading. Since there is currently no right-side button here, the header `<h2>` will be wrapped in a flex row and the "Clear All" button added.
 
-The user's "Max characters per caption" setting remains the hard upper limit -- no segment can exceed it.
+**Review & Edit section** — already has a flex header row with the "Generate All" button. The "Clear All" button will be added as a second button beside it (e.g., `gap-2` between them).
+
+**Ready to Download section** — already has a flex header row with the "Download All" button. "Clear All" sits beside it.
+
+### Button style
+
+All three "Clear All" buttons use:
+- `variant="ghost"` with `size="sm"` to keep them visually subordinate to the primary action buttons
+- `text-muted-foreground hover:text-destructive` colouring to signal a destructive action without being alarming
+- `Trash2` icon from `lucide-react`
 
 ## Technical Details
 
-### Changes to `src/lib/transcription.ts`
-
-**New constant:**
-- `SOFT_BREAK_THRESHOLD = 45` -- the character count at which we start looking for conjunction/preposition breaks even without punctuation.
-
-**New helper: `endsWithClauseBreak(word)`**
-- Returns true if a word ends with `,`, `;`, or `--`.
-
-**Rewritten `processWordsIntoSegments(words, maxLength)`:**
-- Scans words sequentially, building up a candidate segment.
-- On encountering sentence-ending punctuation (`.!?`): immediately finalize the segment (even if short), as long as the 3-word minimum is met.
-- On encountering a clause break (`,;--`): record it as a candidate break point.
-- On exceeding `SOFT_BREAK_THRESHOLD` (~45 chars): start tracking conjunction/preposition break points.
-- On approaching `maxLength`: select the best available break point using the priority order above.
-- **Balance logic**: When multiple break candidates exist, score them by how close to a 50/50 split they produce and pick the most balanced option.
-
-**Rewritten `findBestBreakPoint(words, startIdx, endIdx, maxLength)`:**
-- Collects all candidate break points (punctuation, clause, conjunction) with their indices.
-- Scores each candidate by balance (how evenly it splits remaining text).
-- Returns the highest-priority, most-balanced break.
-
-**Anti-orphan check added to break selection:**
-- Before finalizing a break, verify the resulting segment does not end with a single preposition. If it does, pull the preposition into the next segment.
-
-**`applyAntiOrphanLogic` remains unchanged** -- it handles post-processing merges for segments under 3 words.
-
-### No other files are changed.
-This is purely a logic refinement within the existing segmentation pipeline. The UI, sanitization layer, and SRT export format are unaffected.
+- No new files, no new dependencies.
+- `Trash2` is imported from `lucide-react` (already installed).
+- The `resetTranscriber` import is already present and unused here — no side-effect from the new handlers.
+- For **Processing**, clearing the UI list does not cancel the underlying async transcription already running (the active job in `isProcessingRef`). Only queued-but-not-started files will be visually removed. This matches the existing behaviour of the individual "X" button on processing items.
