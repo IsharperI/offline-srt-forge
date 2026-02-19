@@ -21,26 +21,39 @@ export interface TranscriptionProgress {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let transcriber: any = null;
-let isLoading = false;
+let loadingPromise: Promise<void> | null = null;
 let currentModelId: string | null = null;
 
 const DEFAULT_MODEL = 'onnx-community/whisper-tiny.en';
 
-export async function initializeTranscriber(
+const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s: ${label}`)), ms)
+    ),
+  ]);
+}
+
+export function initializeTranscriber(
   onProgress?: (progress: TranscriptionProgress) => void,
   modelId: string = DEFAULT_MODEL
 ): Promise<void> {
-  if (transcriber && currentModelId === modelId) return;
-  if (isLoading) return;
+  if (transcriber && currentModelId === modelId) return Promise.resolve();
+
+  // If already loading the same model, share the in-flight promise
+  if (loadingPromise) return loadingPromise;
+
   if (currentModelId !== modelId) {
     transcriber = null;
     currentModelId = null;
   }
-  
-  isLoading = true;
-  onProgress?.({ status: 'loading', progress: 0, message: `Loading model: ${modelId}...` });
-  
-  try {
+
+  loadingPromise = (async () => {
+    onProgress?.({ status: 'loading', progress: 0, message: `Loading model: ${modelId}...` });
+
     const result = await pipeline(
       "automatic-speech-recognition",
       modelId,
@@ -56,22 +69,21 @@ export async function initializeTranscriber(
         }
       }
     );
-    
+
     if (typeof result !== 'function') {
       console.error('Pipeline returned non-function:', typeof result, result);
       throw new Error('Model failed to initialize properly');
     }
-    
+
     transcriber = result;
     currentModelId = modelId;
     console.log('Transcriber initialized successfully:', typeof transcriber, 'Model:', modelId);
     onProgress?.({ status: 'loading', progress: 100, message: 'Model loaded successfully' });
-  } catch (error) {
-    console.error('Failed to load transcriber:', error);
-    throw error;
-  } finally {
-    isLoading = false;
-  }
+  })().finally(() => {
+    loadingPromise = null;
+  });
+
+  return loadingPromise;
 }
 
 export function getCurrentModelId(): string | null {
@@ -218,11 +230,15 @@ export async function transcribeAudio(
   try {
     onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
-    const result = await transcriber!(audioUrl, {
-      return_timestamps: true,
-      chunk_length_s: 30,
-      stride_length_s: 5,
-    }) as AutomaticSpeechRecognitionOutput;
+    const result = await withTimeout(
+      transcriber!(audioUrl, {
+        return_timestamps: true,
+        chunk_length_s: 30,
+        stride_length_s: 5,
+      }) as Promise<AutomaticSpeechRecognitionOutput>,
+      TRANSCRIPTION_TIMEOUT_MS,
+      audioFile.name
+    );
     
     console.log('Transcription result:', result);
     
