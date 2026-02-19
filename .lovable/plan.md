@@ -1,40 +1,102 @@
 
-# Add "Clear All" Button
+# Fix: Queue Hang Prevention for Large File Batches
 
-## Overview
+## What's Going Wrong
 
-A "Clear All" button will be added to each section that can accumulate multiple files: **Processing**, **Review & Edit**, and **Ready to Download**. It appears only when there are 2 or more files in that section (alongside the existing individual "X" remove buttons, which are unchanged).
+There are two interlocking bugs that cause files to get stuck in "Queued..." when more than ~10 files are uploaded.
 
-## Changes — `src/pages/Index.tsx` only
+### Bug 1: Silent bail in `initializeTranscriber`
 
-### New handler functions
+Inside `initializeTranscriber` (in `transcription.ts`), there is a guard at the top:
 
-Three new handlers will be added, one per section:
+```
+if (isLoading) return;
+```
 
-- `handleClearAllProcessing` — sets `processingFiles` to `[]`
-- `handleClearAllReview` — sets `reviewFiles` to `[]`
-- `handleClearAllCompleted` — sets `completedFiles` to `[]`
+This returns `undefined` — a completely silent no-op. When a queued file starts processing while the model is already loading for the previous file, `transcribeAudio` calls `initializeTranscriber`, which returns immediately leaving `transcriber` as `null`. The code then hits the null-check right after and throws `'Failed to initialize transcription model'`. This error bubbles to the `catch` block in `processNextInQueue`, which correctly marks the file as errored and releases `isProcessingRef`... but this means files 2–N in a large batch can error out instantly rather than waiting for the model to finish loading.
 
-### UI additions
+The fix: replace `if (isLoading) return;` with a **wait-and-share** mechanism using a `Promise` that all callers can `await`. If loading is already in progress, any subsequent caller simply awaits the same in-flight promise instead of bailing out.
 
-Each section header row (which already uses `flex items-center justify-between`) gets a "Clear All" button on the right side, displayed only when the section has more than 1 file.
+### Bug 2: No timeout watchdog
 
-**Processing section** — sits next to the existing "Processing" heading. Since there is currently no right-side button here, the header `<h2>` will be wrapped in a flex row and the "Clear All" button added.
+The transcription of a single file (`transcriber!(audioUrl, ...)`) is a raw `await` with no timeout. If the WebAssembly model hangs on a malformed audio file, all subsequent queued files are frozen indefinitely because `isProcessingRef.current` is never set back to `false`.
 
-**Review & Edit section** — already has a flex header row with the "Generate All" button. The "Clear All" button will be added as a second button beside it (e.g., `gap-2` between them).
+The fix: wrap the `transcriber` call in a `Promise.race` with a configurable timeout (default: 3 minutes). If it times out, a descriptive error is thrown, the catch block handles it normally, and the queue advances to the next file.
 
-**Ready to Download section** — already has a flex header row with the "Download All" button. "Clear All" sits beside it.
+## Changes — Two files only
 
-### Button style
+### `src/lib/transcription.ts`
 
-All three "Clear All" buttons use:
-- `variant="ghost"` with `size="sm"` to keep them visually subordinate to the primary action buttons
-- `text-muted-foreground hover:text-destructive` colouring to signal a destructive action without being alarming
-- `Trash2` icon from `lucide-react`
+**1. Replace the `isLoading` boolean guard with a shared promise:**
 
-## Technical Details
+```ts
+// Before (broken):
+let isLoading = false;
+// ...
+if (isLoading) return;  // <-- silent bail
+isLoading = true;
 
-- No new files, no new dependencies.
-- `Trash2` is imported from `lucide-react` (already installed).
-- The `resetTranscriber` import is already present and unused here — no side-effect from the new handlers.
-- For **Processing**, clearing the UI list does not cancel the underlying async transcription already running (the active job in `isProcessingRef`). Only queued-but-not-started files will be visually removed. This matches the existing behaviour of the individual "X" button on processing items.
+// After (fixed):
+let loadingPromise: Promise<void> | null = null;
+// ...
+if (loadingPromise) return loadingPromise;  // <-- await the same promise
+loadingPromise = (async () => { ... })().finally(() => { loadingPromise = null; });
+return loadingPromise;
+```
+
+Every caller — no matter how many files are in the queue — will now `await` the single shared loading promise rather than getting a silent no-op.
+
+**2. Add a per-file transcription timeout:**
+
+A `withTimeout` helper wraps the model call:
+
+```ts
+const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s: ${label}`)), ms)
+    )
+  ]);
+}
+```
+
+The `transcriber!(audioUrl, { ... })` call is wrapped:
+
+```ts
+const result = await withTimeout(
+  transcriber!(audioUrl, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 }),
+  TRANSCRIPTION_TIMEOUT_MS,
+  audioFile.name
+);
+```
+
+**3. Add a timeout error message to `Index.tsx`:**
+
+In `processNextInQueue`'s catch block, add a check for timeout errors so users see a clear message rather than a raw error string:
+
+```ts
+} else if (error.message.includes('Timed out')) {
+  errorMessage = 'Processing timed out — file may be too long or corrupted';
+}
+```
+
+### `src/pages/Index.tsx`
+
+Only the error message handler in `processNextInQueue` is updated — one extra `else if` branch for timeout detection. No structural changes.
+
+## What stays the same
+
+- Sequential processing order (one file at a time) is preserved.
+- The queue data structure (`fileQueueRef`, `isProcessingRef`) is unchanged.
+- All existing error handling paths are unchanged.
+- No new dependencies.
+- No UI changes beyond the new timeout error message string.
+
+## Outcome
+
+- With 10+ files: files 2–N now correctly wait for the model to finish loading before attempting transcription, instead of erroring or hanging.
+- If any single file hangs the model for more than 3 minutes, it is automatically marked as an error and the queue advances.
+- The "Queued..." status resolves correctly for every file in the batch.
