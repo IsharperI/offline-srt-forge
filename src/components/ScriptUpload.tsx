@@ -1,9 +1,8 @@
-import { useState, useRef } from 'react';
-import { FileText, Upload, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { toast } from '@/hooks/use-toast';
 
 interface ScriptUploadProps {
   scriptText: string | null;
