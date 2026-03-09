@@ -66,7 +66,75 @@ function isSimilar(a: string, b: string): boolean {
 }
 
 // ==========================================
-// Validation: 70% match threshold
+// Split script into sentences
+// ==========================================
+
+function splitIntoSentences(text: string): string[] {
+  // Split on sentence-ending punctuation, keeping non-empty results
+  const raw = text.split(/(?<=[.!?])\s+/);
+  return raw.map(s => s.trim()).filter(s => s.length > 0);
+}
+
+// ==========================================
+// Find the best matching portion of script for a transcript
+// ==========================================
+
+export function findMatchingScriptPortion(
+  transcriptText: string,
+  fullScriptText: string
+): { matchedPortion: string; matchPercentage: number; isValid: boolean } {
+  const sentences = splitIntoSentences(fullScriptText);
+  
+  // If only one sentence or no sentence breaks, treat whole script as one portion
+  if (sentences.length <= 1) {
+    const validation = validateScriptMatch(transcriptText, fullScriptText);
+    return { matchedPortion: fullScriptText, ...validation };
+  }
+
+  const transcriptWords = tokenize(transcriptText).map(normalizeWord).filter(w => w.length > 0);
+  
+  // Try all contiguous ranges of sentences, find the one with highest match
+  let bestMatch = { startIdx: 0, endIdx: 0, matchPercentage: 0 };
+
+  for (let start = 0; start < sentences.length; start++) {
+    for (let end = start + 1; end <= Math.min(start + 5, sentences.length); end++) {
+      const portion = sentences.slice(start, end).join(' ');
+      const portionWords = tokenize(portion).map(normalizeWord).filter(w => w.length > 0);
+      
+      if (portionWords.length === 0) continue;
+
+      // Sequential matching
+      let tIdx = 0;
+      let matches = 0;
+      for (const sw of portionWords) {
+        const windowEnd = Math.min(tIdx + 5, transcriptWords.length);
+        for (let j = tIdx; j < windowEnd; j++) {
+          if (isSimilar(transcriptWords[j], sw)) {
+            matches++;
+            tIdx = j + 1;
+            break;
+          }
+        }
+        if (tIdx < transcriptWords.length) tIdx = Math.max(tIdx, tIdx);
+      }
+
+      const pct = Math.round((matches / portionWords.length) * 100);
+      if (pct > bestMatch.matchPercentage) {
+        bestMatch = { startIdx: start, endIdx: end, matchPercentage: pct };
+      }
+    }
+  }
+
+  const matchedPortion = sentences.slice(bestMatch.startIdx, bestMatch.endIdx).join(' ');
+  return {
+    matchedPortion,
+    matchPercentage: bestMatch.matchPercentage,
+    isValid: bestMatch.matchPercentage >= 70,
+  };
+}
+
+// ==========================================
+// Validation: 70% match threshold (full script)
 // ==========================================
 
 export function validateScriptMatch(
@@ -80,12 +148,10 @@ export function validateScriptMatch(
     return { isValid: false, matchPercentage: 0 };
   }
 
-  // Sequential matching: walk both lists
   let tIdx = 0;
   let matches = 0;
 
   for (const sw of scriptWords) {
-    // Look ahead in transcript for a match (within a window)
     const windowEnd = Math.min(tIdx + 5, transcriptWords.length);
     let found = false;
     for (let j = tIdx; j < windowEnd; j++) {
@@ -97,7 +163,7 @@ export function validateScriptMatch(
       }
     }
     if (!found && tIdx < transcriptWords.length) {
-      tIdx++; // skip ahead even if no match
+      tIdx++;
     }
   }
 

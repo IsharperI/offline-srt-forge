@@ -20,7 +20,7 @@ import {
   TranscriptSegment,
 } from '@/lib/transcription';
 import { ScriptUpload } from '@/components/ScriptUpload';
-import { validateScriptMatch, alignTranscriptToScript } from '@/lib/scriptAlignment';
+import { findMatchingScriptPortion, alignTranscriptToScript } from '@/lib/scriptAlignment';
 import { toast } from '@/hooks/use-toast';
 
 interface ProcessedFileData {
@@ -104,12 +104,12 @@ const Index = () => {
       let finalSegments = cleanedSegments;
       if (scriptText) {
         const transcriptText = cleanedSegments.map(s => s.text).join(' ');
-        const validation = validateScriptMatch(transcriptText, scriptText);
+        const { matchedPortion, matchPercentage, isValid } = findMatchingScriptPortion(transcriptText, scriptText);
         
-        if (!validation.isValid) {
+        if (!isValid) {
           toast({
             title: 'Incorrect script file',
-            description: `Only ${validation.matchPercentage}% of words matched (70% required). Please try again with the correct script.`,
+            description: `Only ${matchPercentage}% of words matched (70% required). Please try again with the correct script.`,
             variant: 'destructive',
           });
           setProcessingFiles(prev =>
@@ -119,14 +119,13 @@ const Index = () => {
                 : f
             )
           );
-          // Skip to next file
           fileQueueRef.current = fileQueueRef.current.slice(1);
           isProcessingRef.current = false;
           if (fileQueueRef.current.length > 0) processNextInQueue();
           return;
         }
 
-        finalSegments = alignTranscriptToScript(cleanedSegments, scriptText);
+        finalSegments = alignTranscriptToScript(cleanedSegments, matchedPortion);
       }
 
       // Move to review state
