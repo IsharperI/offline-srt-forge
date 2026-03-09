@@ -100,7 +100,36 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
-      // Move to review state (instead of directly generating SRT)
+      // Step B2: Script alignment (if reference script provided)
+      let finalSegments = cleanedSegments;
+      if (scriptText) {
+        const transcriptText = cleanedSegments.map(s => s.text).join(' ');
+        const validation = validateScriptMatch(transcriptText, scriptText);
+        
+        if (!validation.isValid) {
+          toast({
+            title: 'Incorrect script file',
+            description: `Only ${validation.matchPercentage}% of words matched (70% required). Please try again with the correct script.`,
+            variant: 'destructive',
+          });
+          setProcessingFiles(prev =>
+            prev.map(f =>
+              f.id === fileId
+                ? { ...f, progress: { status: 'error', progress: 0, message: 'Incorrect script file, please try again' } }
+                : f
+            )
+          );
+          // Skip to next file
+          fileQueueRef.current = fileQueueRef.current.slice(1);
+          isProcessingRef.current = false;
+          if (fileQueueRef.current.length > 0) processNextInQueue();
+          return;
+        }
+
+        finalSegments = alignTranscriptToScript(cleanedSegments, scriptText);
+      }
+
+      // Move to review state
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
       setReviewFiles(prev => [
         ...prev,
@@ -108,7 +137,7 @@ const Index = () => {
           id: fileId,
           filename: file.name,
           duration,
-          segments: cleanedSegments,
+          segments: finalSegments,
         },
       ]);
     } catch (error) {
