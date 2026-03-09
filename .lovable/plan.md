@@ -1,97 +1,102 @@
 
+# Fix: Queue Hang Prevention for Large File Batches
 
-# Reference Script Upload & Alignment Feature
+## What's Going Wrong
 
-## Overview
+There are two interlocking bugs that cause files to get stuck in "Queued..." when more than ~10 files are uploaded.
 
-Add the ability for users to upload a reference script (.txt or .docx) or paste text. When provided, the app uses audio transcription for timing but replaces the words with the script text, validated by a 70% word-match threshold.
+### Bug 1: Silent bail in `initializeTranscriber`
 
-## New Files
+Inside `initializeTranscriber` (in `transcription.ts`), there is a guard at the top:
 
-### `src/components/ScriptUpload.tsx`
-A component placed between the settings panel and the file dropzone in Index.tsx.
+```
+if (isLoading) return;
+```
 
-**UI**: A collapsible section with:
-- A "Provide Reference Script" toggle/button that expands to reveal:
-  - A textarea for pasting text
-  - An "Upload .txt/.docx" button (file input accepting `.txt,.docx`)
-  - A "Clear Script" button when script is loaded
-  - A small status indicator showing word count of loaded script
+This returns `undefined` — a completely silent no-op. When a queued file starts processing while the model is already loading for the previous file, `transcribeAudio` calls `initializeTranscriber`, which returns immediately leaving `transcriber` as `null`. The code then hits the null-check right after and throws `'Failed to initialize transcription model'`. This error bubbles to the `catch` block in `processNextInQueue`, which correctly marks the file as errored and releases `isProcessingRef`... but this means files 2–N in a large batch can error out instantly rather than waiting for the model to finish loading.
 
-**Props**: `scriptText: string | null`, `onScriptChange: (text: string | null) => void`, `disabled: boolean`
+The fix: replace `if (isLoading) return;` with a **wait-and-share** mechanism using a `Promise` that all callers can `await`. If loading is already in progress, any subsequent caller simply awaits the same in-flight promise instead of bailing out.
 
-**DOCX parsing**: Use the `document--parse_document` approach — actually, since this runs client-side, we'll read `.txt` files via `FileReader.readAsText()` and for `.docx` files, extract raw text by reading the XML inside the zip. We'll add a lightweight client-side `.docx` text extractor (the docx format is a zip containing `word/document.xml` — we can use the browser's built-in decompression API or a simple regex on the XML to strip tags). Simpler approach: just support `.txt` files and plain text paste. For `.docx`, we can read it as ArrayBuffer and do basic XML text extraction.
+### Bug 2: No timeout watchdog
 
-### `src/lib/scriptAlignment.ts`
-Contains the alignment and validation logic.
+The transcription of a single file (`transcriber!(audioUrl, ...)`) is a raw `await` with no timeout. If the WebAssembly model hangs on a malformed audio file, all subsequent queued files are frozen indefinitely because `isProcessingRef.current` is never set back to `false`.
 
-**Exported functions:**
+The fix: wrap the `transcriber` call in a `Promise.race` with a configurable timeout (default: 3 minutes). If it times out, a descriptive error is thrown, the catch block handles it normally, and the queue advances to the next file.
 
-1. **`validateScriptMatch(transcriptText: string, scriptText: string): { isValid: boolean; matchPercentage: number }`**
-   - Normalizes both texts (lowercase, strip punctuation, split to words)
-   - Uses a simple word-matching algorithm: for each word in the script, check if it appears in the transcript (accounting for order via a sliding window or sequential matching)
-   - Returns match percentage and validity (≥70% = valid)
-
-2. **`alignTranscriptToScript(segments: TranscriptSegment[], scriptText: string): TranscriptSegment[]`**
-   - Extracts all words with timing from the transcript segments
-   - Tokenizes the script into words
-   - Performs word-level alignment: maps each transcript word to the corresponding script word using a simple sequential alignment (since both should follow the same order)
-   - Handles mismatches (insertions/deletions) by using the script word when the transcript word is a phonetic near-match (e.g., "9" vs "nine"), or keeping the script word with interpolated timing
-   - Returns new TranscriptSegment[] with script words but transcript timing
-
-## Changes to Existing Files
-
-### `src/pages/Index.tsx`
-
-- Add `scriptText` state: `useState<string | null>(null)`
-- Render `<ScriptUpload>` component between settings panel and file dropzone
-- Pass `scriptText` down; disable when processing
-- In `processNextInQueue`, after `sanitizeSegments(rawSegments)`:
-  - If `scriptText` is provided:
-    - Call `validateScriptMatch()` with the raw transcript text and script text
-    - If <70% match: set error status on the file with message "Incorrect script file, please try again" and skip to next file
-    - If ≥70% match: call `alignTranscriptToScript()` to replace transcript words with script words while keeping timing
-    - Pass aligned segments to review state instead of raw cleaned segments
+## Changes — Two files only
 
 ### `src/lib/transcription.ts`
 
-No changes needed. The alignment produces standard `TranscriptSegment[]` which flows through the existing `generateSRT` → `buildCaptionSegments` pipeline, preserving all semantic break rules.
+**1. Replace the `isLoading` boolean guard with a shared promise:**
 
-## Alignment Algorithm Detail
+```ts
+// Before (broken):
+let isLoading = false;
+// ...
+if (isLoading) return;  // <-- silent bail
+isLoading = true;
 
-The alignment uses a **sequential greedy match**:
-
-```text
-Transcript words (with timing):  ["the", "cat", "sat", "on", "9", "chairs"]
-Script words (no timing):        ["The", "cat", "sat", "on", "nine", "chairs"]
-
-Step: Walk both lists in parallel.
-- If words match (case-insensitive, ignoring punctuation): use script word, keep timing → next both
-- If words don't match but are phonetically similar or close edit distance: use script word, keep timing → next both  
-- If script has extra word (insertion): insert script word with interpolated timing
-- If transcript has extra word (deletion): skip transcript word
-
-Result: script words with transcript timing attached.
+// After (fixed):
+let loadingPromise: Promise<void> | null = null;
+// ...
+if (loadingPromise) return loadingPromise;  // <-- await the same promise
+loadingPromise = (async () => { ... })().finally(() => { loadingPromise = null; });
+return loadingPromise;
 ```
 
-For the similarity check, use normalized Levenshtein distance with a threshold (≤50% of word length = "close enough") plus a small lookup for common number-to-word mappings (1→one, 2→two, etc.).
+Every caller — no matter how many files are in the queue — will now `await` the single shared loading promise rather than getting a silent no-op.
 
-## Validation Flow
+**2. Add a per-file transcription timeout:**
 
-```text
-Audio uploaded → Transcribe (get timing) → Sanitize
-                                              ↓
-                              Script provided? ──No──→ Normal flow (review)
-                                   ↓ Yes
-                              Validate match ≥70%?
-                                 ↓ No          ↓ Yes
-                          Error toast:       Align transcript
-                          "Incorrect         to script words
-                          script file"       → Review with
-                                               aligned captions
+A `withTimeout` helper wraps the model call:
+
+```ts
+const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s: ${label}`)), ms)
+    )
+  ]);
+}
 ```
 
-## UI Placement
+The `transcriber!(audioUrl, { ... })` call is wrapped:
 
-The script upload sits in the settings area, below the model selector and character limit, above the file dropzone. It's a collapsible section so it doesn't clutter the UI for users who don't need it.
+```ts
+const result = await withTimeout(
+  transcriber!(audioUrl, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 }),
+  TRANSCRIPTION_TIMEOUT_MS,
+  audioFile.name
+);
+```
 
+**3. Add a timeout error message to `Index.tsx`:**
+
+In `processNextInQueue`'s catch block, add a check for timeout errors so users see a clear message rather than a raw error string:
+
+```ts
+} else if (error.message.includes('Timed out')) {
+  errorMessage = 'Processing timed out — file may be too long or corrupted';
+}
+```
+
+### `src/pages/Index.tsx`
+
+Only the error message handler in `processNextInQueue` is updated — one extra `else if` branch for timeout detection. No structural changes.
+
+## What stays the same
+
+- Sequential processing order (one file at a time) is preserved.
+- The queue data structure (`fileQueueRef`, `isProcessingRef`) is unchanged.
+- All existing error handling paths are unchanged.
+- No new dependencies.
+- No UI changes beyond the new timeout error message string.
+
+## Outcome
+
+- With 10+ files: files 2–N now correctly wait for the model to finish loading before attempting transcription, instead of erroring or hanging.
+- If any single file hangs the model for more than 3 minutes, it is automatically marked as an error and the queue advances.
+- The "Queued..." status resolves correctly for every file in the batch.
