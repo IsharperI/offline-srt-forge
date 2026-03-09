@@ -60,6 +60,7 @@ const Index = () => {
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
+  const [scriptText, setScriptText] = useState<string | null>(null);
   
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
