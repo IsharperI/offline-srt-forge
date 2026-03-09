@@ -332,6 +332,13 @@ const Index = () => {
                 (20-200)
               </span>
             </div>
+
+            {/* Reference Script */}
+            <ScriptUpload
+              scriptText={scriptText}
+              onScriptChange={setScriptText}
+              disabled={isProcessing || reviewFiles.length > 0}
+            />
           </div>
         )}
 
