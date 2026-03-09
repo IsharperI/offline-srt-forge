@@ -19,6 +19,9 @@ import {
   TranscriptionProgress,
   TranscriptSegment,
 } from '@/lib/transcription';
+import { ScriptUpload } from '@/components/ScriptUpload';
+import { validateScriptMatch, alignTranscriptToScript } from '@/lib/scriptAlignment';
+import { toast } from '@/hooks/use-toast';
 
 interface ProcessedFileData {
   id: string;
