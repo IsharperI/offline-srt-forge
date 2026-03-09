@@ -128,12 +128,12 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
 
       <CollapsibleContent className="mt-3 space-y-3">
         <p className="text-xs text-muted-foreground">
-          Provide a reference script to correct transcription wording. The audio timing is preserved, but words are replaced with the script text.
+          Paste a reference script to correct transcription wording. Each audio file will automatically match to its corresponding portion of the script.
         </p>
 
         {/* Textarea for pasting */}
         <Textarea
-          placeholder="Paste your script text here..."
+          placeholder="Paste your full script here... Each audio file will be matched to its corresponding sentence(s) automatically."
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
           className="min-h-[100px] text-sm"
@@ -150,26 +150,6 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
           >
             Apply Script
           </Button>
-
-          {/* File upload */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled}
-            className="gap-1.5"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            Upload .txt / .docx
-          </Button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".txt,.docx"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
 
           {/* Clear */}
           {scriptText && (
