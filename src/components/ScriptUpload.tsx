@@ -10,54 +10,9 @@ interface ScriptUploadProps {
   disabled: boolean;
 }
 
-async function extractDocxText(arrayBuffer: ArrayBuffer): Promise<string> {
-  try {
-    // .docx files are ZIP archives; use DecompressionStream to extract document.xml
-    const blob = new Blob([arrayBuffer]);
-    // Simple approach: read as text and try to find XML content
-    // For proper DOCX support, we'd need a zip library. For now, try basic extraction.
-    const bytes = new Uint8Array(arrayBuffer);
-    
-    // Check for ZIP magic number
-    if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
-      throw new Error('Not a valid DOCX file');
-    }
-
-    // Use the browser's built-in zip support isn't available, so we do a basic approach:
-    // Find word/document.xml in the zip and extract text from XML tags
-    const text = new TextDecoder().decode(arrayBuffer);
-    
-    // Find <w:t> tags which contain the actual text content in DOCX
-    const matches = text.match(/<w:t[^>]*>([^<]*)<\/w:t>/g);
-    if (!matches || matches.length === 0) {
-      throw new Error('Could not extract text from DOCX file');
-    }
-
-    // Extract text content from tags, joining with spaces
-    const extracted = matches
-      .map(m => {
-        const match = m.match(/<w:t[^>]*>([^<]*)<\/w:t>/);
-        return match ? match[1] : '';
-      })
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!extracted) {
-      throw new Error('DOCX file appears to be empty');
-    }
-
-    return extracted;
-  } catch (error) {
-    if (error instanceof Error) throw error;
-    throw new Error('Failed to parse DOCX file');
-  }
-}
-
 export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUploadProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const wordCount = scriptText
     ? scriptText.split(/\s+/).filter(w => w.length > 0).length
