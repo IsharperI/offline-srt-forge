@@ -18,36 +18,6 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
     ? scriptText.split(/\s+/).filter(w => w.length > 0).length
     : 0;
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      if (file.name.endsWith('.txt')) {
-        const text = await file.text();
-        if (!text.trim()) {
-          toast({ title: 'Empty file', description: 'The uploaded file contains no text.', variant: 'destructive' });
-          return;
-        }
-        onScriptChange(text.trim());
-        setPasteText(text.trim());
-      } else if (file.name.endsWith('.docx')) {
-        const buffer = await file.arrayBuffer();
-        const text = await extractDocxText(buffer);
-        onScriptChange(text);
-        setPasteText(text);
-      } else {
-        toast({ title: 'Unsupported format', description: 'Please upload a .txt or .docx file.', variant: 'destructive' });
-      }
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to read file';
-      toast({ title: 'File error', description: msg, variant: 'destructive' });
-    }
-
-    // Reset input
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
   const handlePasteApply = () => {
     const trimmed = pasteText.trim();
     if (!trimmed) {
@@ -85,7 +55,6 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
           Paste a reference script to correct transcription wording. Each audio file will automatically match to its corresponding portion of the script.
         </p>
 
-        {/* Textarea for pasting */}
         <Textarea
           placeholder="Paste your full script here... Each audio file will be matched to its corresponding sentence(s) automatically."
           value={pasteText}
@@ -95,7 +64,6 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
         />
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Apply pasted text */}
           <Button
             variant="outline"
             size="sm"
@@ -105,7 +73,6 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
             Apply Script
           </Button>
 
-          {/* Clear */}
           {scriptText && (
             <Button
               variant="ghost"
@@ -123,7 +90,7 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
         {scriptText && (
           <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2">
             <p className="text-xs text-primary font-medium">
-              ✓ Script loaded — {wordCount} words. Transcription will be aligned to this script.
+              ✓ Script loaded — {wordCount} words. Each audio file will be matched to its portion automatically.
             </p>
           </div>
         )}
