@@ -10,16 +10,6 @@ import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/components/ui/alert-dialog';
-import {
   transcribeAudio,
   sanitizeSegments,
   generateSRT,
@@ -29,9 +19,6 @@ import {
   TranscriptionProgress,
   TranscriptSegment,
 } from '@/lib/transcription';
-import { ScriptUpload } from '@/components/ScriptUpload';
-import { findMatchingScriptPortion, alignTranscriptToScript } from '@/lib/scriptAlignment';
-import { toast } from '@/hooks/use-toast';
 
 interface ProcessedFileData {
   id: string;
@@ -69,27 +56,11 @@ const Index = () => {
   const [reviewFiles, setReviewFiles] = useState<ReviewFileData[]>([]);
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
-  const [selectedModel, setSelectedModel] = useState('onnx-community/whisper-base');
-  const [scriptText, setScriptText] = useState<string | null>(null);
-  const [scriptMismatchOpen, setScriptMismatchOpen] = useState(false);
-  const scriptMismatchResolveRef = useRef<((continueWithout: boolean) => void) | null>(null);
+  const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
-
-  const askScriptMismatch = useCallback((matchPct: number): Promise<boolean> => {
-    return new Promise((resolve) => {
-      scriptMismatchResolveRef.current = resolve;
-      setScriptMismatchOpen(true);
-    });
-  }, []);
-
-  const handleMismatchResponse = (continueWithout: boolean) => {
-    setScriptMismatchOpen(false);
-    scriptMismatchResolveRef.current?.(continueWithout);
-    scriptMismatchResolveRef.current = null;
-  };
 
   const processNextInQueue = useCallback(async () => {
     if (isProcessingRef.current || fileQueueRef.current.length === 0) {
@@ -125,37 +96,7 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
-      // Step B2: Script alignment (if reference script provided)
-      let finalSegments = cleanedSegments;
-      if (scriptText) {
-        const transcriptText = cleanedSegments.map(s => s.text).join(' ');
-        const { matchedPortion, matchPercentage, isValid } = findMatchingScriptPortion(transcriptText, scriptText);
-        
-        if (!isValid) {
-          // Ask user whether to continue without script
-          const continueWithout = await askScriptMismatch(matchPercentage);
-          
-          if (!continueWithout) {
-            // User chose No — cancel this file
-            setProcessingFiles(prev =>
-              prev.map(f =>
-                f.id === fileId
-                  ? { ...f, progress: { status: 'error' as const, progress: 0, message: 'Cancelled — script mismatch' } }
-                  : f
-              )
-            );
-            fileQueueRef.current = fileQueueRef.current.slice(1);
-            isProcessingRef.current = false;
-            if (fileQueueRef.current.length > 0) processNextInQueue();
-            return;
-          }
-          // User chose Yes — continue with raw transcription (no script alignment)
-        } else {
-          finalSegments = alignTranscriptToScript(cleanedSegments, matchedPortion);
-        }
-      }
-
-      // Move to review state
+      // Move to review state (instead of directly generating SRT)
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
       setReviewFiles(prev => [
         ...prev,
@@ -163,7 +104,7 @@ const Index = () => {
           id: fileId,
           filename: file.name,
           duration,
-          segments: finalSegments,
+          segments: cleanedSegments,
         },
       ]);
     } catch (error) {
@@ -204,7 +145,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [selectedModel, askScriptMismatch]);
+  }, [selectedModel]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -311,7 +252,7 @@ const Index = () => {
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8 max-w-3xl">
         {/* Features Banner */}
-        <div className="flex flex-wrap justify-center gap-6 mb-4">
+        <div className="flex flex-wrap justify-center gap-6 mb-8">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Shield className="w-4 h-4 text-success" />
             <span>100% Offline</span>
@@ -321,11 +262,6 @@ const Index = () => {
             <span>Browser-Based AI</span>
           </div>
         </div>
-
-        {/* Instructions */}
-        <p className="text-center text-sm text-muted-foreground mb-8">
-          Select your speech model first, then upload your reference script below. When you drop your audio files below, your captions will be generated automatically.
-        </p>
 
         {/* Model Loading State */}
         {isModelLoading && (
@@ -363,13 +299,6 @@ const Index = () => {
                 (20-200)
               </span>
             </div>
-
-            {/* Reference Script */}
-            <ScriptUpload
-              scriptText={scriptText}
-              onScriptChange={setScriptText}
-              disabled={isProcessing || reviewFiles.length > 0}
-            />
           </div>
         )}
 
@@ -521,26 +450,6 @@ const Index = () => {
           </p>
         </div>
       </footer>
-
-      {/* Script Mismatch Confirmation */}
-      <AlertDialog open={scriptMismatchOpen} onOpenChange={() => {}}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Script Mismatch</AlertDialogTitle>
-            <AlertDialogDescription>
-              The script does not match the uploaded audio. Would you like to continue without the reference script?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => handleMismatchResponse(false)}>
-              No, cancel
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleMismatchResponse(true)}>
-              Yes, continue without script
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };

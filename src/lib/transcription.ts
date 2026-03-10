@@ -24,7 +24,7 @@ let transcriber: any = null;
 let loadingPromise: Promise<void> | null = null;
 let currentModelId: string | null = null;
 
-const DEFAULT_MODEL = 'onnx-community/whisper-base';
+const DEFAULT_MODEL = 'onnx-community/whisper-tiny.en';
 
 const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
@@ -193,7 +193,7 @@ export async function transcribeAudio(
   onProgress?: (progress: TranscriptionProgress) => void,
   modelId?: string
 ): Promise<TranscriptSegment[]> {
-  const targetModel = modelId || 'onnx-community/whisper-base';
+  const targetModel = modelId || 'onnx-community/whisper-tiny.en';
   
   if (!transcriber || typeof transcriber !== 'function' || currentModelId !== targetModel) {
     transcriber = null;
