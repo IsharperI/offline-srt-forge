@@ -311,7 +311,7 @@ const Index = () => {
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8 max-w-3xl">
         {/* Features Banner */}
-        <div className="flex flex-wrap justify-center gap-6 mb-8">
+        <div className="flex flex-wrap justify-center gap-6 mb-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Shield className="w-4 h-4 text-success" />
             <span>100% Offline</span>
@@ -321,6 +321,11 @@ const Index = () => {
             <span>Browser-Based AI</span>
           </div>
         </div>
+
+        {/* Instructions */}
+        <p className="text-center text-sm text-muted-foreground mb-8">
+          Select your speech model and upload your reference script below, then drop your audio files to generate captions.
+        </p>
 
         {/* Model Loading State */}
         {isModelLoading && (
