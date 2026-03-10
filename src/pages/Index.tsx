@@ -516,6 +516,26 @@ const Index = () => {
           </p>
         </div>
       </footer>
+
+      {/* Script Mismatch Confirmation */}
+      <AlertDialog open={scriptMismatchOpen} onOpenChange={() => {}}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Script Mismatch</AlertDialogTitle>
+            <AlertDialogDescription>
+              The script does not match the uploaded audio. Would you like to continue without the reference script?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => handleMismatchResponse(false)}>
+              No, cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleMismatchResponse(true)}>
+              Yes, continue without script
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
