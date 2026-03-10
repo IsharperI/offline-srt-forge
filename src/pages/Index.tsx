@@ -324,7 +324,7 @@ const Index = () => {
 
         {/* Instructions */}
         <p className="text-center text-sm text-muted-foreground mb-8">
-          Select your speech model and upload your reference script below, then drop your audio files to generate captions.
+          Select your speech model first, then upload your reference script below. When you drop your audio files below, your captions will be generated automatically.
         </p>
 
         {/* Model Loading State */}
