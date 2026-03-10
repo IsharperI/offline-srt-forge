@@ -71,10 +71,25 @@ const Index = () => {
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   const [scriptText, setScriptText] = useState<string | null>(null);
+  const [scriptMismatchOpen, setScriptMismatchOpen] = useState(false);
+  const scriptMismatchResolveRef = useRef<((continueWithout: boolean) => void) | null>(null);
   
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
+
+  const askScriptMismatch = useCallback((matchPct: number): Promise<boolean> => {
+    return new Promise((resolve) => {
+      scriptMismatchResolveRef.current = resolve;
+      setScriptMismatchOpen(true);
+    });
+  }, []);
+
+  const handleMismatchResponse = (continueWithout: boolean) => {
+    setScriptMismatchOpen(false);
+    scriptMismatchResolveRef.current?.(continueWithout);
+    scriptMismatchResolveRef.current = null;
+  };
 
   const processNextInQueue = useCallback(async () => {
     if (isProcessingRef.current || fileQueueRef.current.length === 0) {
