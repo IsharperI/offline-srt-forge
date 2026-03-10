@@ -10,6 +10,16 @@ import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog';
+import {
   transcribeAudio,
   sanitizeSegments,
   generateSRT,
