@@ -132,25 +132,27 @@ const Index = () => {
         const { matchedPortion, matchPercentage, isValid } = findMatchingScriptPortion(transcriptText, scriptText);
         
         if (!isValid) {
-          toast({
-            title: 'Incorrect script file',
-            description: `Only ${matchPercentage}% of words matched (70% required). Please try again with the correct script.`,
-            variant: 'destructive',
-          });
-          setProcessingFiles(prev =>
-            prev.map(f =>
-              f.id === fileId
-                ? { ...f, progress: { status: 'error', progress: 0, message: 'Incorrect script file, please try again' } }
-                : f
-            )
-          );
-          fileQueueRef.current = fileQueueRef.current.slice(1);
-          isProcessingRef.current = false;
-          if (fileQueueRef.current.length > 0) processNextInQueue();
-          return;
+          // Ask user whether to continue without script
+          const continueWithout = await askScriptMismatch(matchPercentage);
+          
+          if (!continueWithout) {
+            // User chose No — cancel this file
+            setProcessingFiles(prev =>
+              prev.map(f =>
+                f.id === fileId
+                  ? { ...f, progress: { status: 'error' as const, progress: 0, message: 'Cancelled — script mismatch' } }
+                  : f
+              )
+            );
+            fileQueueRef.current = fileQueueRef.current.slice(1);
+            isProcessingRef.current = false;
+            if (fileQueueRef.current.length > 0) processNextInQueue();
+            return;
+          }
+          // User chose Yes — continue with raw transcription (no script alignment)
+        } else {
+          finalSegments = alignTranscriptToScript(cleanedSegments, matchedPortion);
         }
-
-        finalSegments = alignTranscriptToScript(cleanedSegments, matchedPortion);
       }
 
       // Move to review state
