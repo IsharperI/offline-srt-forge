@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { FileText, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { FileText, X, ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { toast } from '@/hooks/use-toast';
 
 interface ScriptUploadProps {
   scriptText: string | null;
@@ -10,9 +11,49 @@ interface ScriptUploadProps {
   disabled: boolean;
 }
 
+async function extractDocxText(arrayBuffer: ArrayBuffer): Promise<string> {
+  try {
+    const blob = new Blob([arrayBuffer], { type: 'application/zip' });
+    const ds = new DecompressionStream('deflate-raw');
+    // Try using the ZIP structure to find word/document.xml
+    const bytes = new Uint8Array(arrayBuffer);
+    const textDecoder = new TextDecoder();
+    const fullText = textDecoder.decode(bytes);
+    
+    // Find the document.xml content between PK headers
+    const xmlMatch = fullText.match(/<w:body[\s\S]*?<\/w:body>/);
+    if (xmlMatch) {
+      // Strip XML tags and extract text content
+      const bodyXml = xmlMatch[0];
+      const textParts: string[] = [];
+      const regex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+      let match;
+      while ((match = regex.exec(bodyXml)) !== null) {
+        textParts.push(match[1]);
+      }
+      if (textParts.length > 0) {
+        return textParts.join('');
+      }
+    }
+
+    // Fallback: extract all w:t tags from the raw bytes
+    const allText = textDecoder.decode(bytes);
+    const parts: string[] = [];
+    const fallbackRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+    let m;
+    while ((m = fallbackRegex.exec(allText)) !== null) {
+      parts.push(m[1]);
+    }
+    return parts.join('') || '';
+  } catch {
+    return '';
+  }
+}
+
 export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUploadProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const wordCount = scriptText
     ? scriptText.split(/\s+/).filter(w => w.length > 0).length
@@ -25,6 +66,43 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
       return;
     }
     onScriptChange(trimmed);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const name = file.name.toLowerCase();
+
+    try {
+      if (name.endsWith('.txt')) {
+        const text = await file.text();
+        const trimmed = text.trim();
+        if (!trimmed) {
+          toast({ title: 'Empty file', description: 'The uploaded file contains no text.', variant: 'destructive' });
+          return;
+        }
+        setPasteText(trimmed);
+        onScriptChange(trimmed);
+      } else if (name.endsWith('.docx') || name.endsWith('.doc')) {
+        const buffer = await file.arrayBuffer();
+        const text = await extractDocxText(buffer);
+        const trimmed = text.trim();
+        if (!trimmed) {
+          toast({ title: 'Could not extract text', description: 'Unable to read text from this document. Try a .txt file instead.', variant: 'destructive' });
+          return;
+        }
+        setPasteText(trimmed);
+        onScriptChange(trimmed);
+      } else {
+        toast({ title: 'Unsupported format', description: 'Please upload a .txt or .docx file.', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error reading file', description: 'Could not read the uploaded file.', variant: 'destructive' });
+    }
+
+    // Reset input so same file can be re-uploaded
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleClear = () => {
@@ -52,7 +130,7 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
 
       <CollapsibleContent className="mt-3 space-y-3">
         <p className="text-xs text-muted-foreground">
-          Paste a reference script to correct transcription wording. Each audio file will automatically match to its corresponding portion of the script.
+          Paste or upload a reference script to correct transcription wording. Each audio file will automatically match to its corresponding portion of the script.
         </p>
 
         <Textarea
@@ -72,6 +150,25 @@ export function ScriptUpload({ scriptText, onScriptChange, disabled }: ScriptUpl
           >
             Apply Script
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            className="gap-1.5"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Upload .txt / .docx
+          </Button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,.docx,.doc"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
 
           {scriptText && (
             <Button

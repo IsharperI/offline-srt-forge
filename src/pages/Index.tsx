@@ -10,6 +10,16 @@ import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog';
+import {
   transcribeAudio,
   sanitizeSegments,
   generateSRT,
@@ -61,10 +71,25 @@ const Index = () => {
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   const [scriptText, setScriptText] = useState<string | null>(null);
+  const [scriptMismatchOpen, setScriptMismatchOpen] = useState(false);
+  const scriptMismatchResolveRef = useRef<((continueWithout: boolean) => void) | null>(null);
   
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
+
+  const askScriptMismatch = useCallback((matchPct: number): Promise<boolean> => {
+    return new Promise((resolve) => {
+      scriptMismatchResolveRef.current = resolve;
+      setScriptMismatchOpen(true);
+    });
+  }, []);
+
+  const handleMismatchResponse = (continueWithout: boolean) => {
+    setScriptMismatchOpen(false);
+    scriptMismatchResolveRef.current?.(continueWithout);
+    scriptMismatchResolveRef.current = null;
+  };
 
   const processNextInQueue = useCallback(async () => {
     if (isProcessingRef.current || fileQueueRef.current.length === 0) {
@@ -107,25 +132,27 @@ const Index = () => {
         const { matchedPortion, matchPercentage, isValid } = findMatchingScriptPortion(transcriptText, scriptText);
         
         if (!isValid) {
-          toast({
-            title: 'Incorrect script file',
-            description: `Only ${matchPercentage}% of words matched (70% required). Please try again with the correct script.`,
-            variant: 'destructive',
-          });
-          setProcessingFiles(prev =>
-            prev.map(f =>
-              f.id === fileId
-                ? { ...f, progress: { status: 'error', progress: 0, message: 'Incorrect script file, please try again' } }
-                : f
-            )
-          );
-          fileQueueRef.current = fileQueueRef.current.slice(1);
-          isProcessingRef.current = false;
-          if (fileQueueRef.current.length > 0) processNextInQueue();
-          return;
+          // Ask user whether to continue without script
+          const continueWithout = await askScriptMismatch(matchPercentage);
+          
+          if (!continueWithout) {
+            // User chose No — cancel this file
+            setProcessingFiles(prev =>
+              prev.map(f =>
+                f.id === fileId
+                  ? { ...f, progress: { status: 'error' as const, progress: 0, message: 'Cancelled — script mismatch' } }
+                  : f
+              )
+            );
+            fileQueueRef.current = fileQueueRef.current.slice(1);
+            isProcessingRef.current = false;
+            if (fileQueueRef.current.length > 0) processNextInQueue();
+            return;
+          }
+          // User chose Yes — continue with raw transcription (no script alignment)
+        } else {
+          finalSegments = alignTranscriptToScript(cleanedSegments, matchedPortion);
         }
-
-        finalSegments = alignTranscriptToScript(cleanedSegments, matchedPortion);
       }
 
       // Move to review state
@@ -177,7 +204,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [selectedModel]);
+  }, [selectedModel, askScriptMismatch]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -489,6 +516,26 @@ const Index = () => {
           </p>
         </div>
       </footer>
+
+      {/* Script Mismatch Confirmation */}
+      <AlertDialog open={scriptMismatchOpen} onOpenChange={() => {}}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Script Mismatch</AlertDialogTitle>
+            <AlertDialogDescription>
+              The script does not match the uploaded audio. Would you like to continue without the reference script?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => handleMismatchResponse(false)}>
+              No, cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleMismatchResponse(true)}>
+              Yes, continue without script
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
