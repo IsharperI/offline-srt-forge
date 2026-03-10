@@ -193,7 +193,7 @@ export async function transcribeAudio(
   onProgress?: (progress: TranscriptionProgress) => void,
   modelId?: string
 ): Promise<TranscriptSegment[]> {
-  const targetModel = modelId || 'onnx-community/whisper-tiny.en';
+  const targetModel = modelId || 'onnx-community/whisper-base';
   
   if (!transcriber || typeof transcriber !== 'function' || currentModelId !== targetModel) {
     transcriber = null;
