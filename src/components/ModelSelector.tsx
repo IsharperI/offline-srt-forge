@@ -125,30 +125,28 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-4">
-        <Label htmlFor="modelSelect" className="text-sm font-medium text-foreground whitespace-nowrap">
-          Speech Model:
-        </Label>
-        <Select
-          value={displayValue}
-          onValueChange={handleSelectChange}
-          disabled={disabled}
-        >
-          <SelectTrigger className="w-64">
-            <SelectValue placeholder="Select a model" />
-          </SelectTrigger>
-          <SelectContent>
-            {PRESET_MODELS.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                <div className="flex flex-col items-start">
-                  <span className="font-medium">{model.name}</span>
-                  <span className="text-xs text-muted-foreground">{model.description}</span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <Label htmlFor="modelSelect" className="text-sm font-medium text-foreground">
+        Speech Model:
+      </Label>
+      <Select
+        value={displayValue}
+        onValueChange={handleSelectChange}
+        disabled={disabled}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder="Select a model" />
+        </SelectTrigger>
+        <SelectContent>
+          {PRESET_MODELS.map((model) => (
+            <SelectItem key={model.id} value={model.id}>
+              <div className="flex flex-col items-start">
+                <span className="font-medium">{model.name}</span>
+                <span className="text-xs text-muted-foreground">{model.description}</span>
+              </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {/* Custom Model Input */}
       <Collapsible open={isCustomOpen || isUsingCustom} onOpenChange={setIsCustomOpen}>
