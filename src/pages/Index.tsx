@@ -69,7 +69,7 @@ const Index = () => {
   const [reviewFiles, setReviewFiles] = useState<ReviewFileData[]>([]);
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
-  const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
+  const [selectedModel, setSelectedModel] = useState('onnx-community/whisper-base');
   const [scriptText, setScriptText] = useState<string | null>(null);
   const [scriptMismatchOpen, setScriptMismatchOpen] = useState(false);
   const scriptMismatchResolveRef = useRef<((continueWithout: boolean) => void) | null>(null);
