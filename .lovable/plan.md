@@ -1,113 +1,102 @@
 
+# Fix: Queue Hang Prevention for Large File Batches
 
-# Add "Reference Script" Tab
+## What's Going Wrong
 
-## Overview
+There are two interlocking bugs that cause files to get stuck in "Queued..." when more than ~10 files are uploaded.
 
-Add a tabbed interface to the main page. The existing transcription workflow lives under "Audio Transcription." A new "Reference Script" tab lets users paste or upload a script (.txt or .docx), upload audio files, and the app aligns the script text to audio timestamps using Whisper for timing only.
+### Bug 1: Silent bail in `initializeTranscriber`
 
-An "Export Script Template" button downloads a sample .txt file showing the recommended formatting conventions.
+Inside `initializeTranscriber` (in `transcription.ts`), there is a guard at the top:
 
-## Architecture
-
-### File changes
-
-| File | Action |
-|------|--------|
-| `src/pages/Index.tsx` | Wrap content in `<Tabs>`, extract existing logic to `TranscriptionTab`, add `ReferenceScriptTab` |
-| `src/components/TranscriptionTab.tsx` | New — all existing transcription logic moved here verbatim |
-| `src/components/ReferenceScriptTab.tsx` | New — reference script workflow |
-| `src/components/ScriptInput.tsx` | New — textarea + .txt/.docx file upload + template export button |
-| `src/lib/scriptAlignment.ts` | New — alignment algorithm + DOCX text extraction + template generation |
-
-### Index.tsx restructure
-
-The header, features banner, and footer stay in `Index.tsx`. The main content area becomes:
-
-```text
-<Tabs defaultValue="transcription">
-  <TabsList>
-    <TabsTrigger value="transcription">Audio Transcription</TabsTrigger>
-    <TabsTrigger value="reference">Reference Script</TabsTrigger>
-  </TabsList>
-  <TabsContent value="transcription">
-    <TranscriptionTab />
-  </TabsContent>
-  <TabsContent value="reference">
-    <ReferenceScriptTab />
-  </TabsContent>
-</Tabs>
+```
+if (isLoading) return;
 ```
 
-### TranscriptionTab.tsx
+This returns `undefined` — a completely silent no-op. When a queued file starts processing while the model is already loading for the previous file, `transcribeAudio` calls `initializeTranscriber`, which returns immediately leaving `transcriber` as `null`. The code then hits the null-check right after and throws `'Failed to initialize transcription model'`. This error bubbles to the `catch` block in `processNextInQueue`, which correctly marks the file as errored and releases `isProcessingRef`... but this means files 2–N in a large batch can error out instantly rather than waiting for the model to finish loading.
 
-All existing state, handlers, and JSX from `Index.tsx` (model loading, file queue, processing, review, completed sections) moves here unchanged. Shared settings (model selector, char limit) live inside each tab independently so they can be configured per-workflow.
+The fix: replace `if (isLoading) return;` with a **wait-and-share** mechanism using a `Promise` that all callers can `await`. If loading is already in progress, any subsequent caller simply awaits the same in-flight promise instead of bailing out.
 
-### ScriptInput.tsx
+### Bug 2: No timeout watchdog
 
-- A `<Textarea>` for pasting script text directly
-- A file upload button accepting `.txt` and `.docx` files
-- For `.txt`: read via `FileReader.readAsText()`
-- For `.docx`: extract text from the ZIP's `word/document.xml` using browser-native `DecompressionStream` API — strip XML tags to get plain text. No new dependencies.
-- An "Export Script Template" button that downloads a `.txt` file with formatting guidelines and an example script structure
+The transcription of a single file (`transcriber!(audioUrl, ...)`) is a raw `await` with no timeout. If the WebAssembly model hangs on a malformed audio file, all subsequent queued files are frozen indefinitely because `isProcessingRef.current` is never set back to `false`.
 
-### Script template content
+The fix: wrap the `transcriber` call in a `Promise.race` with a configurable timeout (default: 3 minutes). If it times out, a descriptive error is thrown, the catch block handles it normally, and the queue advances to the next file.
 
-The exported template file will contain:
+## Changes — Two files only
 
-```text
-=== SRT GENERATOR - SCRIPT TEMPLATE ===
+### `src/lib/transcription.ts`
 
-FORMAT GUIDELINES:
-- Write one sentence per line
-- Use blank lines to separate paragraphs or scenes
-- Punctuation matters: periods, commas, and question marks
-  help the AI break captions at natural points
-- Speaker labels (optional): prefix lines with "SPEAKER:"
+**1. Replace the `isLoading` boolean guard with a shared promise:**
 
-EXAMPLE:
----
-Welcome to our product overview.
-Today we'll walk through three key features.
+```ts
+// Before (broken):
+let isLoading = false;
+// ...
+if (isLoading) return;  // <-- silent bail
+isLoading = true;
 
-First, let's talk about the dashboard.
-The dashboard gives you a real-time view of all your metrics.
-You can customize it to show exactly what matters to you.
-
-Next, we have the reporting module.
-Reports can be exported as PDF or CSV files.
----
+// After (fixed):
+let loadingPromise: Promise<void> | null = null;
+// ...
+if (loadingPromise) return loadingPromise;  // <-- await the same promise
+loadingPromise = (async () => { ... })().finally(() => { loadingPromise = null; });
+return loadingPromise;
 ```
 
-### ReferenceScriptTab.tsx
+Every caller — no matter how many files are in the queue — will now `await` the single shared loading promise rather than getting a silent no-op.
 
-Workflow:
-1. User inputs script (paste or upload .txt/.docx) via `ScriptInput`
-2. User uploads audio file(s) via the existing `FileDropzone` component
-3. App runs Whisper on each audio file (reuses `transcribeAudio` + progress UI)
-4. Alignment: calls `alignScriptToAudio()` to match script words to transcribed timestamps
-5. If match percentage < 70%, shows an `AlertDialog`: "Script does not closely match audio (X% match). Use raw transcription instead?" with "Use Raw Transcription" and "Cancel" options
-6. Results go through the same Review & Edit (`CaptionEditor`) and Download flow
+**2. Add a per-file transcription timeout:**
 
-### scriptAlignment.ts
+A `withTimeout` helper wraps the model call:
 
-**`extractTextFromDocx(file: File): Promise<string>`**
-- Uses `DecompressionStream` to unzip the .docx
-- Finds `word/document.xml` entry
-- Strips XML tags, returns plain text
+```ts
+const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
-**`alignScriptToAudio(scriptText: string, transcribedSegments: TranscriptSegment[]): AlignmentResult`**
-- Flattens transcript into word list with timestamps
-- Normalizes both script and transcript words (lowercase, strip punctuation)
-- Sequential greedy match: for each script word, find the next matching transcript word, inherit its timestamp
-- Unmatched script words get interpolated timing from surrounding matches
-- Returns `{ segments: TranscriptSegment[], matchPercentage: number }`
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s: ${label}`)), ms)
+    )
+  ]);
+}
+```
 
-**`generateScriptTemplate(): string`**
-- Returns the template text content shown above
+The `transcriber!(audioUrl, { ... })` call is wrapped:
 
-**`downloadScriptTemplate(): void`**
-- Creates a Blob and triggers download of `script-template.txt`
+```ts
+const result = await withTimeout(
+  transcriber!(audioUrl, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 }),
+  TRANSCRIPTION_TIMEOUT_MS,
+  audioFile.name
+);
+```
 
-The aligned segments feed into the existing `generateSRT` pipeline (semantic breaks, char limits, anti-orphan) unchanged.
+**3. Add a timeout error message to `Index.tsx`:**
 
+In `processNextInQueue`'s catch block, add a check for timeout errors so users see a clear message rather than a raw error string:
+
+```ts
+} else if (error.message.includes('Timed out')) {
+  errorMessage = 'Processing timed out — file may be too long or corrupted';
+}
+```
+
+### `src/pages/Index.tsx`
+
+Only the error message handler in `processNextInQueue` is updated — one extra `else if` branch for timeout detection. No structural changes.
+
+## What stays the same
+
+- Sequential processing order (one file at a time) is preserved.
+- The queue data structure (`fileQueueRef`, `isProcessingRef`) is unchanged.
+- All existing error handling paths are unchanged.
+- No new dependencies.
+- No UI changes beyond the new timeout error message string.
+
+## Outcome
+
+- With 10+ files: files 2–N now correctly wait for the model to finish loading before attempting transcription, instead of erroring or hanging.
+- If any single file hangs the model for more than 3 minutes, it is automatically marked as an error and the queue advances.
+- The "Queued..." status resolves correctly for every file in the batch.
