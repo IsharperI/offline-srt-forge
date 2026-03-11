@@ -35,7 +35,7 @@ export async function extractTextFromDocx(file: File): Promise<string> {
     xmlText = decoder.decode(docEntry.compressedData);
   } else {
     // Deflated — use DecompressionStream
-    const compressedStream = new Blob([docEntry.compressedData]).stream();
+    const compressedStream = new Blob([docEntry.compressedData.buffer as ArrayBuffer]).stream();
     const decompressedStream = compressedStream.pipeThrough(new DecompressionStream('deflate-raw'));
     const reader = decompressedStream.getReader();
     const chunks: Uint8Array[] = [];
