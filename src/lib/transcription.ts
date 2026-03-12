@@ -250,7 +250,7 @@ export async function transcribeAudio(
       for (const chunk of result.chunks) {
         if (chunk.timestamp && Array.isArray(chunk.timestamp)) {
           const [start, end] = chunk.timestamp;
-          const text = chunk.text?.trim() || '';
+          const text = (chunk.text || '').replace(/<\|[\d.]+\|>/g, '').trim();
           if (text) {
             const startTime = typeof start === 'number' ? start : 0;
             const endTime = typeof end === 'number' ? end : (startTime + 2);
@@ -326,6 +326,10 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
   
   const cleanMixedContent = (text: string): string => {
     let cleaned = text;
+    // Strip Whisper timestamp tokens: <|0.00|>
+    cleaned = cleaned.replace(/<\|[\d.]+\|>/g, '');
+    // Strip bracketed/bare timestamp formats: [00:00.000], 0:00, 00:00:00
+    cleaned = cleaned.replace(/\[?\d{1,2}:\d{2}(?:[:.]\d{1,3})?\]?/g, '');
     for (const pattern of cleanPatterns) {
       cleaned = cleaned.replace(pattern, '').trim();
     }
