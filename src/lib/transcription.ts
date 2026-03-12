@@ -702,11 +702,14 @@ function clampSegmentsToDuration(segments: TranscriptSegment[], maxDuration: num
 // Generate SRT content
 export function generateSRT(segments: TranscriptSegment[], audioDuration?: number, maxLineLength: number = DEFAULT_MAX_LINE_LENGTH): string {
   const formatTime = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    const millis = Math.round((seconds % 1) * 1000);
-    
+    let totalMs = Math.round(seconds * 1000);
+    const hours = Math.floor(totalMs / 3600000);
+    totalMs %= 3600000;
+    const minutes = Math.floor(totalMs / 60000);
+    totalMs %= 60000;
+    const secs = Math.floor(totalMs / 1000);
+    const millis = totalMs % 1000;
+
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
   };
   
