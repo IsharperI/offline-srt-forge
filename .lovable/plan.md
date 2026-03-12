@@ -1,102 +1,44 @@
 
-# Fix: Queue Hang Prevention for Large File Batches
 
-## What's Going Wrong
+# Fix: Strip Timestamp Tokens from Caption Text
 
-There are two interlocking bugs that cause files to get stuck in "Queued..." when more than ~10 files are uploaded.
+## Problem
 
-### Bug 1: Silent bail in `initializeTranscriber`
+The Whisper model occasionally leaks timestamp tokens into the transcribed text itself. These appear as patterns like `<|0.00|>`, `<|12.34|>`, or similar numeric markers embedded within the words. Since there is no sanitization step to catch these, they end up in the final SRT captions.
 
-Inside `initializeTranscriber` (in `transcription.ts`), there is a guard at the top:
+## Solution
 
-```
-if (isLoading) return;
-```
+Add timestamp token stripping in two places for defense-in-depth:
 
-This returns `undefined` — a completely silent no-op. When a queued file starts processing while the model is already loading for the previous file, `transcribeAudio` calls `initializeTranscriber`, which returns immediately leaving `transcriber` as `null`. The code then hits the null-check right after and throws `'Failed to initialize transcription model'`. This error bubbles to the `catch` block in `processNextInQueue`, which correctly marks the file as errored and releases `isProcessingRef`... but this means files 2–N in a large batch can error out instantly rather than waiting for the model to finish loading.
+### 1. At ingestion (line ~253 in `transcribeAudio`)
 
-The fix: replace `if (isLoading) return;` with a **wait-and-share** mechanism using a `Promise` that all callers can `await`. If loading is already in progress, any subsequent caller simply awaits the same in-flight promise instead of bailing out.
-
-### Bug 2: No timeout watchdog
-
-The transcription of a single file (`transcriber!(audioUrl, ...)`) is a raw `await` with no timeout. If the WebAssembly model hangs on a malformed audio file, all subsequent queued files are frozen indefinitely because `isProcessingRef.current` is never set back to `false`.
-
-The fix: wrap the `transcriber` call in a `Promise.race` with a configurable timeout (default: 3 minutes). If it times out, a descriptive error is thrown, the catch block handles it normally, and the queue advances to the next file.
-
-## Changes — Two files only
-
-### `src/lib/transcription.ts`
-
-**1. Replace the `isLoading` boolean guard with a shared promise:**
+Strip timestamp tokens from `chunk.text` immediately when extracting it from the model output, before it enters the pipeline:
 
 ```ts
-// Before (broken):
-let isLoading = false;
-// ...
-if (isLoading) return;  // <-- silent bail
-isLoading = true;
-
-// After (fixed):
-let loadingPromise: Promise<void> | null = null;
-// ...
-if (loadingPromise) return loadingPromise;  // <-- await the same promise
-loadingPromise = (async () => { ... })().finally(() => { loadingPromise = null; });
-return loadingPromise;
+const text = (chunk.text || '').replace(/<\|[\d.]+\|>/g, '').trim();
 ```
 
-Every caller — no matter how many files are in the queue — will now `await` the single shared loading promise rather than getting a silent no-op.
+### 2. In `sanitizeSegments` (the existing sanitization layer)
 
-**2. Add a per-file transcription timeout:**
+Add a broader timestamp-stripping regex to `cleanMixedContent` that catches any format the model might produce:
 
-A `withTimeout` helper wraps the model call:
+- `<|0.00|>` — Whisper's native timestamp token format
+- `[00:00.000]` or `(00:00.000)` — bracket/paren timestamp formats  
+- Bare `0:00` or `00:00:00` patterns surrounded by spaces
 
+Regex patterns to add:
 ```ts
-const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s: ${label}`)), ms)
-    )
-  ]);
-}
+/<\|[\d.]+\|>/g          // Whisper tokens: <|0.00|>
+/\[?\d{1,2}:\d{2}(?:[:.]\d{1,3})?\]?/g  // [0:00.0] or bare 0:00 formats
 ```
 
-The `transcriber!(audioUrl, { ... })` call is wrapped:
+The second pattern is applied carefully — only removing matches that look like timestamps (digits:digits with optional decimal), not arbitrary text.
 
-```ts
-const result = await withTimeout(
-  transcriber!(audioUrl, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 }),
-  TRANSCRIPTION_TIMEOUT_MS,
-  audioFile.name
-);
-```
+### Files changed
 
-**3. Add a timeout error message to `Index.tsx`:**
+**`src/lib/transcription.ts`** only — two small additions:
+1. One `.replace()` call on line ~253 in `transcribeAudio`
+2. Two regex patterns added to `cleanMixedContent` inside `sanitizeSegments`
 
-In `processNextInQueue`'s catch block, add a check for timeout errors so users see a clear message rather than a raw error string:
+No UI changes. No new files or dependencies.
 
-```ts
-} else if (error.message.includes('Timed out')) {
-  errorMessage = 'Processing timed out — file may be too long or corrupted';
-}
-```
-
-### `src/pages/Index.tsx`
-
-Only the error message handler in `processNextInQueue` is updated — one extra `else if` branch for timeout detection. No structural changes.
-
-## What stays the same
-
-- Sequential processing order (one file at a time) is preserved.
-- The queue data structure (`fileQueueRef`, `isProcessingRef`) is unchanged.
-- All existing error handling paths are unchanged.
-- No new dependencies.
-- No UI changes beyond the new timeout error message string.
-
-## Outcome
-
-- With 10+ files: files 2–N now correctly wait for the model to finish loading before attempting transcription, instead of erroring or hanging.
-- If any single file hangs the model for more than 3 minutes, it is automatically marked as an error and the queue advances.
-- The "Queued..." status resolves correctly for every file in the batch.
