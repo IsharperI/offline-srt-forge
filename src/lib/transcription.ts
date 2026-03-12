@@ -250,7 +250,7 @@ export async function transcribeAudio(
       for (const chunk of result.chunks) {
         if (chunk.timestamp && Array.isArray(chunk.timestamp)) {
           const [start, end] = chunk.timestamp;
-          const text = chunk.text?.trim() || '';
+          const text = (chunk.text || '').replace(/<\|[\d.]+\|>/g, '').trim();
           if (text) {
             const startTime = typeof start === 'number' ? start : 0;
             const endTime = typeof end === 'number' ? end : (startTime + 2);
