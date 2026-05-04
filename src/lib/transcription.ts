@@ -235,7 +235,7 @@ export async function transcribeAudio(
       transcriber!(audioUrl, {
         return_timestamps: true,
         chunk_length_s: 30,
-        stride_length_s: 1,
+        stride_length_s: 3,
       }) as Promise<AutomaticSpeechRecognitionOutput>,
       TRANSCRIPTION_TIMEOUT_MS,
       audioFile.name
