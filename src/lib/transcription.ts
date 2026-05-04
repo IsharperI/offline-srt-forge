@@ -364,7 +364,8 @@ export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegme
     result.push({
       startTime: segment.startTime,
       endTime: segment.endTime,
-      text: cleanedText
+      text: cleanedText,
+      words: segment.words,
     });
   }
   
