@@ -33,6 +33,16 @@ export interface ModelOption {
 
 export const PRESET_MODELS: ModelOption[] = [
   {
+    id: 'onnx-community/whisper-base.en',
+    name: 'Whisper Base (English)',
+    description: 'Good accuracy, English-only (~140MB)',
+  },
+  {
+    id: 'onnx-community/whisper-base',
+    name: 'Whisper Base (Multilingual)',
+    description: 'Good accuracy, 99 languages (~140MB)',
+  },
+  {
     id: 'onnx-community/whisper-tiny.en',
     name: 'Whisper Tiny (English)',
     description: 'Fast, English-only (~40MB)',
@@ -51,16 +61,6 @@ export const PRESET_MODELS: ModelOption[] = [
     id: 'onnx-community/whisper-small',
     name: 'Whisper Small (Multilingual)',
     description: 'Balanced, supports 99 languages (~240MB)',
-  },
-  {
-    id: 'onnx-community/whisper-base.en',
-    name: 'Whisper Base (English)',
-    description: 'Good accuracy, English-only (~140MB)',
-  },
-  {
-    id: 'onnx-community/whisper-base',
-    name: 'Whisper Base (Multilingual)',
-    description: 'Good accuracy, 99 languages (~140MB)',
   },
   {
     id: 'custom',
