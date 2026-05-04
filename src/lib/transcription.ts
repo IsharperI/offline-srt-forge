@@ -253,7 +253,11 @@ export async function transcribeAudio(
           const text = (chunk.text || '').replace(/<\|[\d.]+\|>/g, '').trim();
           if (text) {
             const startTime = typeof start === 'number' ? start : 0;
-            const endTime = typeof end === 'number' ? end : (startTime + 2);
+            const chunkIndex = result.chunks.indexOf(chunk);
+            const nextChunk = result.chunks[chunkIndex + 1];
+            const endTime = typeof end === 'number'
+              ? end
+              : (typeof nextChunk?.timestamp?.[0] === 'number' ? nextChunk.timestamp[0] : startTime + 2);
             const words = estimateWordTimings(text, startTime, endTime);
             segments.push({ startTime, endTime, text, words });
           }
