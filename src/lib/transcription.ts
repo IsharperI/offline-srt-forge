@@ -191,7 +191,8 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
 export async function transcribeAudio(
   audioFile: File,
   onProgress?: (progress: TranscriptionProgress) => void,
-  modelId?: string
+  modelId?: string,
+  audioDuration?: number
 ): Promise<TranscriptSegment[]> {
   const targetModel = modelId || 'onnx-community/whisper-tiny.en';
   
@@ -257,7 +258,9 @@ export async function transcribeAudio(
             const nextChunk = result.chunks[chunkIndex + 1];
             const endTime = typeof end === 'number'
               ? end
-              : (typeof nextChunk?.timestamp?.[0] === 'number' ? nextChunk.timestamp[0] : startTime + 2);
+              : (typeof nextChunk?.timestamp?.[0] === 'number'
+                ? nextChunk.timestamp[0]
+                : (typeof audioDuration === 'number' ? audioDuration : startTime + 2));
             const words = estimateWordTimings(text, startTime, endTime);
             segments.push({ startTime, endTime, text, words });
           }
