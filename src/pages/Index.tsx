@@ -129,7 +129,7 @@ const Index = () => {
           id: fileId,
           filename: file.name,
           duration,
-          segments: cleanedSegments,
+          segments: correctedSegments,
         },
       ]);
     } catch (error) {
