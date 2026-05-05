@@ -327,6 +327,17 @@ const Index = () => {
           </div>
         )}
 
+        {/* Custom Corrections */}
+        {!isModelLoading && (
+          <div className="mb-6">
+            <CustomCorrections
+              customCorrections={customCorrections}
+              onAdd={handleAddCorrection}
+              onRemove={handleRemoveCorrection}
+            />
+          </div>
+        )}
+
         {/* Upload Zone */}
         {!isModelLoading && (
           <div className="mb-6">
