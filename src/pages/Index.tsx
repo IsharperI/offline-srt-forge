@@ -7,6 +7,7 @@ import { ProcessedFile } from '@/components/ProcessedFile';
 import { ModelLoader } from '@/components/ModelLoader';
 import { CaptionEditor } from '@/components/CaptionEditor';
 import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
+import { CustomCorrections } from '@/components/CustomCorrections';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
