@@ -58,7 +58,20 @@ const Index = () => {
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
-  
+  const [customCorrections, setCustomCorrections] = useState<Record<string, string>>({});
+
+  const handleAddCorrection = useCallback((from: string, to: string) => {
+    setCustomCorrections(prev => ({ ...prev, [from]: to }));
+  }, []);
+
+  const handleRemoveCorrection = useCallback((from: string) => {
+    setCustomCorrections(prev => {
+      const next = { ...prev };
+      delete next[from];
+      return next;
+    });
+  }, []);
+
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
