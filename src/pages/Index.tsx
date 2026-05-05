@@ -7,6 +7,7 @@ import { ProcessedFile } from '@/components/ProcessedFile';
 import { ModelLoader } from '@/components/ModelLoader';
 import { CaptionEditor } from '@/components/CaptionEditor';
 import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
+import { CustomCorrections } from '@/components/CustomCorrections';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
@@ -57,7 +58,20 @@ const Index = () => {
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
-  
+  const [customCorrections, setCustomCorrections] = useState<Record<string, string>>({});
+
+  const handleAddCorrection = useCallback((from: string, to: string) => {
+    setCustomCorrections(prev => ({ ...prev, [from]: to }));
+  }, []);
+
+  const handleRemoveCorrection = useCallback((from: string) => {
+    setCustomCorrections(prev => {
+      const next = { ...prev };
+      delete next[from];
+      return next;
+    });
+  }, []);
+
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
@@ -96,6 +110,17 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
+      // Apply user custom corrections (case-insensitive find & replace)
+      const correctedSegments = cleanedSegments.map(seg => {
+        let text = seg.text;
+        for (const [from, to] of Object.entries(customCorrections)) {
+          if (!from) continue;
+          const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          text = text.replace(new RegExp(escaped, 'gi'), to);
+        }
+        return { ...seg, text };
+      });
+
       // Move to review state (instead of directly generating SRT)
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
       setReviewFiles(prev => [
@@ -104,7 +129,7 @@ const Index = () => {
           id: fileId,
           filename: file.name,
           duration,
-          segments: cleanedSegments,
+          segments: correctedSegments,
         },
       ]);
     } catch (error) {
@@ -145,7 +170,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [selectedModel]);
+  }, [selectedModel, customCorrections]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -299,6 +324,17 @@ const Index = () => {
                 (20-200)
               </span>
             </div>
+          </div>
+        )}
+
+        {/* Custom Corrections */}
+        {!isModelLoading && (
+          <div className="mb-6">
+            <CustomCorrections
+              customCorrections={customCorrections}
+              onAdd={handleAddCorrection}
+              onRemove={handleRemoveCorrection}
+            />
           </div>
         )}
 
