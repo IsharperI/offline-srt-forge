@@ -110,15 +110,13 @@ const Index = () => {
       // Step B: Sanitization
       const cleanedSegments = sanitizeSegments(rawSegments);
 
-      // Apply user custom corrections (case-insensitive find & replace)
-      const correctedSegments = cleanedSegments.map(seg => {
-        let text = seg.text;
-        for (const [from, to] of Object.entries(customCorrections)) {
-          if (!from) continue;
-          const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          text = text.replace(new RegExp(escaped, 'gi'), to);
-        }
-        return { ...seg, text };
+      const correctedSegments = cleanedSegments.map(segment => {
+        let text = segment.text;
+        Object.entries(customCorrections).forEach(([from, to]) => {
+          const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+          text = text.replace(regex, to);
+        });
+        return { ...segment, text };
       });
 
       // Move to review state (instead of directly generating SRT)
