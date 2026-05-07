@@ -305,7 +305,7 @@ const Index = () => {
             >
               <div className="flex items-center gap-2">
                 <Settings2 className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">Model & Corrections</span>
+                <span className="text-sm font-medium text-foreground">Advanced Options</span>
               </div>
               <ChevronDown
                 className={`w-4 h-4 text-muted-foreground transition-transform ${settingsOpen ? 'rotate-180' : ''}`}
