@@ -26,7 +26,7 @@ export const CustomCorrections = ({ customCorrections, onAdd, onRemove }: Custom
   const entries = Object.entries(customCorrections);
 
   return (
-    <div className="p-4 rounded-lg bg-secondary/50 border border-border space-y-3">
+    <div className="space-y-3">
       <Label className="text-sm font-medium text-foreground">Custom Corrections</Label>
 
       <div className="flex flex-wrap items-end gap-2">
