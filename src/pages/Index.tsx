@@ -470,26 +470,7 @@ const Index = () => {
           </div>
         )}
 
-        {/* Empty State Info */}
-        {!isModelLoading && processingFiles.length === 0 && reviewFiles.length === 0 && completedFiles.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-sm text-muted-foreground">
-              Your files are processed entirely in your browser.
-              <br />
-              No data is uploaded to any server.
-            </p>
-          </div>
-        )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border mt-auto">
-        <div className="container mx-auto px-4 py-4">
-          <p className="text-xs text-muted-foreground text-center">
-            All transcription is performed locally using WebAssembly-based speech recognition.
-          </p>
-        </div>
-      </footer>
     </div>
   );
 };
