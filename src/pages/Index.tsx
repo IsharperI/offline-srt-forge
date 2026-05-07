@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { AudioWaveform, Shield, Zap, Download, FileText, Trash2 } from 'lucide-react';
+import { AudioWaveform, Shield, Zap, Download, FileText, Trash2, ChevronDown, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
@@ -59,6 +59,7 @@ const Index = () => {
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   const [customCorrections, setCustomCorrections] = useState<Record<string, string>>({});
+  const [settingsOpen, setSettingsOpen] = useState(true);
 
   const handleAddCorrection = useCallback((from: string, to: string) => {
     setCustomCorrections(prev => ({ ...prev, [from]: to }));
@@ -293,46 +294,61 @@ const Index = () => {
           </div>
         )}
 
-        {/* Model & Settings */}
+        {/* Model, Settings & Custom Corrections (collapsible) */}
         {!isModelLoading && (
-          <div className="mb-4 p-4 rounded-lg bg-secondary/50 border border-border space-y-4">
-            {/* Model Selection */}
-            <ModelSelector
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-              disabled={isProcessing || reviewFiles.length > 0}
-            />
-
-            {/* Character Limit Setting */}
-            <div className="flex items-center gap-4">
-              <Label htmlFor="charLimit" className="text-sm font-medium text-foreground whitespace-nowrap">
-                Max characters per caption:
-              </Label>
-              <Input
-                id="charLimit"
-                type="number"
-                min={20}
-                max={200}
-                value={maxCharLimit}
-                onChange={(e) => setMaxCharLimit(Math.max(20, Math.min(200, parseInt(e.target.value) || 80)))}
-                className="w-24"
-                disabled={isProcessing || reviewFiles.length > 0}
+          <div className="mb-6 rounded-lg bg-secondary/50 border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(o => !o)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-secondary/70 transition-colors"
+              aria-expanded={settingsOpen}
+            >
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">Model & Corrections</span>
+              </div>
+              <ChevronDown
+                className={`w-4 h-4 text-muted-foreground transition-transform ${settingsOpen ? 'rotate-180' : ''}`}
               />
-              <span className="text-xs text-muted-foreground">
-                (20-200)
-              </span>
-            </div>
-          </div>
-        )}
+            </button>
 
-        {/* Custom Corrections */}
-        {!isModelLoading && (
-          <div className="mb-6">
-            <CustomCorrections
-              customCorrections={customCorrections}
-              onAdd={handleAddCorrection}
-              onRemove={handleRemoveCorrection}
-            />
+            {settingsOpen && (
+              <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
+                {/* Model Selection */}
+                <ModelSelector
+                  selectedModel={selectedModel}
+                  onModelChange={setSelectedModel}
+                  disabled={isProcessing || reviewFiles.length > 0}
+                />
+
+                {/* Character Limit Setting */}
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="charLimit" className="text-sm font-medium text-foreground whitespace-nowrap">
+                    Max characters per caption:
+                  </Label>
+                  <Input
+                    id="charLimit"
+                    type="number"
+                    min={20}
+                    max={200}
+                    value={maxCharLimit}
+                    onChange={(e) => setMaxCharLimit(Math.max(20, Math.min(200, parseInt(e.target.value) || 80)))}
+                    className="w-24"
+                    disabled={isProcessing || reviewFiles.length > 0}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    (20-200)
+                  </span>
+                </div>
+
+                {/* Custom Corrections */}
+                <CustomCorrections
+                  customCorrections={customCorrections}
+                  onAdd={handleAddCorrection}
+                  onRemove={handleRemoveCorrection}
+                />
+              </div>
+            )}
           </div>
         )}
 
