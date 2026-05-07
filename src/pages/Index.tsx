@@ -267,7 +267,9 @@ const Index = () => {
             </div>
             <div>
               <h1 className="text-xl font-semibold text-foreground">SRT Generator</h1>
-              <p className="text-xs text-muted-foreground">Offline Audio Transcription</p>
+              <p className="text-xs text-muted-foreground">
+                Your files are processed entirely in your browser. No data is uploaded to any server.
+              </p>
             </div>
           </div>
         </div>
@@ -275,18 +277,6 @@ const Index = () => {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8 max-w-3xl">
-        {/* Features Banner */}
-        <div className="flex flex-wrap justify-center gap-6 mb-8">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Shield className="w-4 h-4 text-success" />
-            <span>100% Offline</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Zap className="w-4 h-4 text-primary" />
-            <span>Browser-Based AI</span>
-          </div>
-        </div>
-
         {/* Model Loading State */}
         {isModelLoading && (
           <div className="mb-6">
@@ -480,26 +470,7 @@ const Index = () => {
           </div>
         )}
 
-        {/* Empty State Info */}
-        {!isModelLoading && processingFiles.length === 0 && reviewFiles.length === 0 && completedFiles.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-sm text-muted-foreground">
-              Your files are processed entirely in your browser.
-              <br />
-              No data is uploaded to any server.
-            </p>
-          </div>
-        )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border mt-auto">
-        <div className="container mx-auto px-4 py-4">
-          <p className="text-xs text-muted-foreground text-center">
-            All transcription is performed locally using WebAssembly-based speech recognition.
-          </p>
-        </div>
-      </footer>
     </div>
   );
 };
