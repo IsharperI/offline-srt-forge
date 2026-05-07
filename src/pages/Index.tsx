@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { AudioWaveform, Shield, Zap, Download, FileText, Trash2 } from 'lucide-react';
+import { AudioWaveform, Shield, Zap, Download, FileText, Trash2, ChevronDown, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FileDropzone } from '@/components/FileDropzone';
 import { ProcessingProgress } from '@/components/ProcessingProgress';
