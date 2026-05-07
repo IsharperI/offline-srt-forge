@@ -267,7 +267,9 @@ const Index = () => {
             </div>
             <div>
               <h1 className="text-xl font-semibold text-foreground">SRT Generator</h1>
-              <p className="text-xs text-muted-foreground">Offline Audio Transcription</p>
+              <p className="text-xs text-muted-foreground">
+                Your files are processed entirely in your browser. No data is uploaded to any server.
+              </p>
             </div>
           </div>
         </div>
