@@ -145,3 +145,108 @@ export function phoneticSimilarity(a: string, b: string): number {
  * of a transcribed word during alignment.
  */
 export const CONFIDENCE_THRESHOLD = 0.75;
+
+/** A single word token from the reference script. */
+export interface ScriptToken {
+  /** Exact word as it appears in the script (preserves casing/acronyms). */
+  original: string;
+  /** Lowercase, punctuation-stripped form (apostrophes preserved) for comparison. */
+  normalized: string;
+  /** Position in the script word array. */
+  index: number;
+}
+
+/**
+ * Tokenize a raw script string into ScriptToken objects, one per word.
+ * Preserves the original casing/punctuation in `original` and produces a
+ * comparison-friendly form in `normalized`.
+ */
+export function tokenizeScript(script: string): ScriptToken[] {
+  const collapsed = (script ?? "").replace(/\s+/g, " ").trim();
+  if (!collapsed) return [];
+
+  const rawWords = collapsed.split(" ");
+  const tokens: ScriptToken[] = [];
+  let idx = 0;
+  for (const w of rawWords) {
+    const normalized = w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+    if (!normalized) continue;
+    tokens.push({ original: w, normalized, index: idx });
+    idx++;
+  }
+  return tokens;
+}
+
+/** Result of locating the best-matching window of script tokens. */
+export interface WindowResult {
+  /** Index into scriptTokens where the best match begins (inclusive). */
+  startIndex: number;
+  /** Index into scriptTokens where the best match ends (inclusive). */
+  endIndex: number;
+  /** 0..1 share of transcribed words that confidently matched. */
+  matchRate: number;
+}
+
+/**
+ * Slide a window over `scriptTokens` (size = transcribedWords.length * 1.5)
+ * and return the window whose script tokens best cover the transcription.
+ *
+ * Scoring: for each transcribed word, find the highest phoneticSimilarity
+ * against any script token within the window; count it as a match if that
+ * score is >= CONFIDENCE_THRESHOLD. matchRate = matches / transcribedWords.
+ */
+export function findBestWindow(
+  transcribedWords: string[],
+  scriptTokens: ScriptToken[]
+): WindowResult {
+  if (scriptTokens.length === 0 || transcribedWords.length === 0) {
+    return { startIndex: 0, endIndex: 0, matchRate: 0 };
+  }
+
+  const normalizedTranscribed = transcribedWords
+    .map((w) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, ""))
+    .filter((w) => w.length > 0);
+
+  if (normalizedTranscribed.length === 0) {
+    return { startIndex: 0, endIndex: 0, matchRate: 0 };
+  }
+
+  const windowSize = Math.min(
+    scriptTokens.length,
+    Math.max(1, Math.ceil(transcribedWords.length * 1.5))
+  );
+  const lastStart = scriptTokens.length - windowSize;
+
+  let bestStart = 0;
+  let bestMatches = -1;
+
+  for (let start = 0; start <= lastStart; start++) {
+    const end = start + windowSize; // exclusive
+    let matches = 0;
+    for (const tw of normalizedTranscribed) {
+      let bestSim = 0;
+      for (let j = start; j < end; j++) {
+        const sim = phoneticSimilarity(tw, scriptTokens[j].normalized);
+        if (sim > bestSim) {
+          bestSim = sim;
+          if (bestSim === 1) break;
+        }
+      }
+      if (bestSim >= CONFIDENCE_THRESHOLD) matches++;
+    }
+    if (matches > bestMatches) {
+      bestMatches = matches;
+      bestStart = start;
+    }
+  }
+
+  const endIndex = Math.min(
+    scriptTokens.length - 1,
+    bestStart + windowSize - 1
+  );
+  return {
+    startIndex: bestStart,
+    endIndex,
+    matchRate: Math.max(0, bestMatches) / normalizedTranscribed.length,
+  };
+}
