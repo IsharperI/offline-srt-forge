@@ -1,0 +1,147 @@
+/**
+ * Utilities for aligning transcribed text to a reference script.
+ *
+ * This module currently exposes low-level helpers (text cleaning and
+ * phonetic-style similarity scoring). A higher-level alignment function
+ * will be added in a later step.
+ */
+
+export interface CleanedText {
+  /** Lowercased, punctuation-stripped text suitable for comparison. */
+  normalized: string;
+  /** Tokenized normalized words (lowercase, no punctuation except apostrophes). */
+  normalizedWords: string[];
+  /**
+   * Tokenized words preserving the original casing and punctuation from the
+   * input. Indices line up 1:1 with `normalizedWords` so a match against the
+   * normalized form can be substituted using the original-cased token.
+   */
+  originalWords: string[];
+}
+
+/**
+ * Clean a string for comparison while preserving the original casing/tokens
+ * in a parallel array so callers can substitute using the source's casing.
+ *
+ * - Normalizes whitespace and trims.
+ * - Lowercases only for the comparison form.
+ * - Removes punctuation except apostrophes (so contractions stay intact).
+ */
+export function cleanText(input: string): CleanedText {
+  const collapsed = (input ?? "").replace(/\s+/g, " ").trim();
+
+  if (!collapsed) {
+    return { normalized: "", normalizedWords: [], originalWords: [] };
+  }
+
+  const originalWords = collapsed.split(" ");
+
+  const normalizedWords = originalWords
+    .map((w) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, ""))
+    .filter((w) => w.length > 0);
+
+  // Re-derive originalWords aligned to non-empty normalized tokens.
+  const alignedOriginalWords: string[] = [];
+  for (const w of originalWords) {
+    const norm = w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+    if (norm.length > 0) alignedOriginalWords.push(w);
+  }
+
+  return {
+    normalized: normalizedWords.join(" "),
+    normalizedWords,
+    originalWords: alignedOriginalWords,
+  };
+}
+
+/** Generate character bigrams for a word. Single-char words return [word]. */
+function bigrams(word: string): string[] {
+  if (word.length <= 1) return [word];
+  const out: string[] = [];
+  for (let i = 0; i < word.length - 1; i++) {
+    out.push(word.slice(i, i + 2));
+  }
+  return out;
+}
+
+/** Strip a trailing apostrophe-s or trailing s/es for plural-ish comparison. */
+function stripPlural(word: string): string {
+  return word
+    .replace(/'s$/i, "")
+    .replace(/es$/i, "")
+    .replace(/s$/i, "");
+}
+
+/** Remove all apostrophes (handle "dont" vs "don't"). */
+function stripApostrophes(word: string): string {
+  return word.replace(/'/g, "");
+}
+
+/**
+ * Score how similar two words sound / look on a 0..1 scale.
+ *
+ *  - 1.0   : exact case-insensitive match.
+ *  - >=0.9 : differ only by common transcription artifacts
+ *            (plural s/es, missing apostrophe, etc.).
+ *  - else  : character bigram (Dice) overlap, with a small-word fallback.
+ *  - 0     : nothing in common.
+ */
+export function phoneticSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+
+  if (x === y) return 1.0;
+
+  // Apostrophe-only differences ("dont" vs "don't").
+  if (stripApostrophes(x) === stripApostrophes(y)) return 0.95;
+
+  // Plural / possessive differences ("cats" vs "cat", "boss" vs "bosses").
+  if (
+    stripPlural(x) === stripPlural(y) ||
+    stripPlural(x) === y ||
+    x === stripPlural(y)
+  ) {
+    return 0.9;
+  }
+
+  // For very short tokens (acronyms, initials, short names), bigram overlap is
+  // unreliable. Fall back to a character-set Jaccard score.
+  if (x.length <= 3 || y.length <= 3) {
+    const setX = new Set(x);
+    const setY = new Set(y);
+    let inter = 0;
+    for (const c of setX) if (setY.has(c)) inter++;
+    const union = new Set([...setX, ...setY]).size;
+    if (union === 0) return 0;
+    const jacc = inter / union;
+    // Require at least one shared character; otherwise treat as dissimilar.
+    return inter === 0 ? 0 : jacc;
+  }
+
+  // Dice coefficient over character bigrams.
+  const bx = bigrams(x);
+  const by = bigrams(y);
+
+  const counts = new Map<string, number>();
+  for (const g of bx) counts.set(g, (counts.get(g) ?? 0) + 1);
+
+  let matches = 0;
+  for (const g of by) {
+    const c = counts.get(g) ?? 0;
+    if (c > 0) {
+      matches++;
+      counts.set(g, c - 1);
+    }
+  }
+
+  if (matches === 0) return 0;
+  return (2 * matches) / (bx.length + by.length);
+}
+
+/**
+ * Minimum similarity score required to substitute a script word in place
+ * of a transcribed word during alignment.
+ */
+export const CONFIDENCE_THRESHOLD = 0.75;
