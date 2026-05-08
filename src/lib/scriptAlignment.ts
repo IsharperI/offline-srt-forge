@@ -250,3 +250,113 @@ export function findBestWindow(
     matchRate: Math.max(0, bestMatches) / normalizedTranscribed.length,
   };
 }
+
+import type { TranscriptSegment } from "./transcription";
+
+/** Result of aligning a transcription against a reference script. */
+export interface AlignmentResult {
+  /** Corrected segments. Original timings (startTime/endTime) are preserved. */
+  segments: TranscriptSegment[];
+  /** 0..1 overall alignment confidence from findBestWindow. */
+  matchRate: number;
+  /** True when matchRate >= 0.75. */
+  scriptWasUseful: boolean;
+}
+
+/**
+ * Align transcribed segments to a reference script, substituting
+ * confidently-matched words with the script's original casing while
+ * preserving every segment's timing fields.
+ */
+export function alignTranscriptionToScript(
+  segments: TranscriptSegment[],
+  scriptText: string
+): AlignmentResult {
+  if (!scriptText || !scriptText.trim()) {
+    return { segments, matchRate: 0, scriptWasUseful: false };
+  }
+
+  const scriptTokens = tokenizeScript(scriptText);
+  if (scriptTokens.length === 0) {
+    return { segments, matchRate: 0, scriptWasUseful: false };
+  }
+
+  // Flatten all transcribed words across segments.
+  const transcribedWords: string[] = [];
+  for (const seg of segments) {
+    for (const w of (seg.text ?? "").split(/\s+/)) {
+      if (w) transcribedWords.push(w);
+    }
+  }
+
+  if (transcribedWords.length === 0) {
+    return { segments, matchRate: 0, scriptWasUseful: false };
+  }
+
+  const window = findBestWindow(transcribedWords, scriptTokens);
+  const windowTokens = scriptTokens.slice(
+    window.startIndex,
+    window.endIndex + 1
+  );
+
+  if (windowTokens.length === 0) {
+    return {
+      segments,
+      matchRate: window.matchRate,
+      scriptWasUseful: window.matchRate >= 0.75,
+    };
+  }
+
+  // Walk segments, substituting words confidently matched within the window.
+  // We advance a cursor through the window so substitutions stay roughly in order.
+  let cursor = 0;
+  const SEARCH_RADIUS = 8;
+
+  const correctedSegments: TranscriptSegment[] = segments.map((seg) => {
+    const rawWords = (seg.text ?? "").split(/(\s+)/); // keep whitespace tokens
+
+    const newParts = rawWords.map((part) => {
+      if (!part || /^\s+$/.test(part)) return part;
+
+      // Strip leading/trailing punctuation for comparison; preserve them on output.
+      const leadMatch = part.match(/^[^\p{L}\p{N}']+/u);
+      const trailMatch = part.match(/[^\p{L}\p{N}']+$/u);
+      const lead = leadMatch ? leadMatch[0] : "";
+      const trail = trailMatch ? trailMatch[0] : "";
+      const core = part.slice(lead.length, part.length - trail.length);
+      const normCore = core.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+
+      if (!normCore) return part;
+
+      const from = Math.max(0, cursor - SEARCH_RADIUS);
+      const to = Math.min(windowTokens.length, cursor + SEARCH_RADIUS + 1);
+
+      let bestSim = 0;
+      let bestIdx = -1;
+      for (let i = from; i < to; i++) {
+        const sim = phoneticSimilarity(normCore, windowTokens[i].normalized);
+        if (sim > bestSim) {
+          bestSim = sim;
+          bestIdx = i;
+          if (sim === 1) break;
+        }
+      }
+
+      if (bestIdx >= 0 && bestSim >= CONFIDENCE_THRESHOLD) {
+        cursor = bestIdx + 1;
+        return `${lead}${windowTokens[bestIdx].original}${trail}`;
+      }
+
+      return part;
+    });
+
+    // Preserve every timing-related field; only replace `text`.
+    return { ...seg, text: newParts.join("") };
+  });
+
+  return {
+    segments: correctedSegments,
+    matchRate: window.matchRate,
+    scriptWasUseful: window.matchRate >= 0.75,
+  };
+}
