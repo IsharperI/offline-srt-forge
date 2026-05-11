@@ -344,9 +344,6 @@ const Index = () => {
                   </span>
                 </div>
 
-                {/* Script Input */}
-                <ScriptInput scriptText={scriptText} onScriptChange={setScriptText} />
-
                 {/* Custom Corrections */}
                 <CustomCorrections
                   customCorrections={customCorrections}
@@ -355,6 +352,13 @@ const Index = () => {
                 />
               </div>
             )}
+          </div>
+        )}
+
+        {/* Reference Script (outside Advanced Options) */}
+        {!isModelLoading && (
+          <div className="mb-6 rounded-lg bg-secondary/50 border border-border px-4 py-3">
+            <ScriptInput scriptText={scriptText} onScriptChange={setScriptText} />
           </div>
         )}
 
