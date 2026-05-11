@@ -8,6 +8,7 @@ import { ModelLoader } from '@/components/ModelLoader';
 import { CaptionEditor } from '@/components/CaptionEditor';
 import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { CustomCorrections } from '@/components/CustomCorrections';
+import { ScriptInput } from '@/components/ScriptInput';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
@@ -59,6 +60,7 @@ const Index = () => {
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   const [customCorrections, setCustomCorrections] = useState<Record<string, string>>({});
+  const [scriptText, setScriptText] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(true);
 
   const handleAddCorrection = useCallback((from: string, to: string) => {
@@ -330,6 +332,9 @@ const Index = () => {
                     (20-200)
                   </span>
                 </div>
+
+                {/* Script Input */}
+                <ScriptInput scriptText={scriptText} onScriptChange={setScriptText} />
 
                 {/* Custom Corrections */}
                 <CustomCorrections
