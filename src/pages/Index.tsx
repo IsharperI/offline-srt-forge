@@ -182,7 +182,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [selectedModel, customCorrections]);
+  }, [selectedModel, customCorrections, scriptText]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
