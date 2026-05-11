@@ -9,6 +9,7 @@ import { CaptionEditor } from '@/components/CaptionEditor';
 import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { CustomCorrections } from '@/components/CustomCorrections';
 import { ScriptInput } from '@/components/ScriptInput';
+import { alignTranscriptionToScript, AlignmentResult } from '@/lib/scriptAlignment';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
@@ -34,6 +35,8 @@ interface ReviewFileData {
   filename: string;
   duration: number;
   segments: TranscriptSegment[];
+  matchRate: number | null;
+  scriptWasUseful: boolean;
 }
 
 interface ProcessingFile {
@@ -111,9 +114,15 @@ const Index = () => {
       const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration);
 
       // Step B: Sanitization
-      const cleanedSegments = sanitizeSegments(rawSegments);
+      let sanitizedSegments = sanitizeSegments(rawSegments);
 
-      const correctedSegments = cleanedSegments.map(segment => {
+      let alignmentResult: AlignmentResult | null = null;
+      if (scriptText.trim()) {
+        alignmentResult = alignTranscriptionToScript(sanitizedSegments, scriptText);
+        sanitizedSegments = alignmentResult.segments;
+      }
+
+      const correctedSegments = sanitizedSegments.map(segment => {
         let text = segment.text;
         Object.entries(customCorrections).forEach(([from, to]) => {
           const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
@@ -131,6 +140,8 @@ const Index = () => {
           filename: file.name,
           duration,
           segments: correctedSegments,
+          matchRate: alignmentResult?.matchRate ?? null,
+          scriptWasUseful: alignmentResult?.scriptWasUseful ?? false,
         },
       ]);
     } catch (error) {
