@@ -83,6 +83,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const [editError, setEditError] = useState<string>('');
 
   // Auto-correct segments on initial load
   useEffect(() => {
@@ -111,9 +112,15 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
     const startTime = parseTimestamp(editStart);
     const endTime = parseTimestamp(editEnd);
     
-    if (startTime === null || endTime === null || startTime >= endTime) {
+    if (startTime === null || endTime === null) {
+      setEditError('Invalid timestamp format. Use M:SS.S (e.g. 1:23.4)');
       return;
     }
+    if (startTime >= endTime) {
+      setEditError('Start time must be before end time');
+      return;
+    }
+    setEditError('');
     
     // Save user's edited text as-is (no auto-correct on manual edits)
     // Clear corrections since user has manually reviewed/edited
@@ -133,6 +140,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
 
   const cancelEdit = () => {
     setEditingIndex(null);
+    setEditError('');
   };
 
   const deleteSegment = (index: number) => {
@@ -207,6 +215,9 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
                           placeholder="0:00.0"
                         />
                       </div>
+                      {editError && (
+                        <p className="text-xs text-red-500">{editError}</p>
+                      )}
                       <Textarea
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
