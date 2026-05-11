@@ -59,6 +59,7 @@ const Index = () => {
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
   const [customCorrections, setCustomCorrections] = useState<Record<string, string>>({});
+  const [scriptText, setScriptText] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(true);
 
   const handleAddCorrection = useCallback((from: string, to: string) => {
