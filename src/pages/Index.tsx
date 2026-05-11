@@ -8,6 +8,7 @@ import { ModelLoader } from '@/components/ModelLoader';
 import { CaptionEditor } from '@/components/CaptionEditor';
 import { ModelSelector, PRESET_MODELS } from '@/components/ModelSelector';
 import { CustomCorrections } from '@/components/CustomCorrections';
+import { ScriptInput } from '@/components/ScriptInput';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
@@ -331,6 +332,9 @@ const Index = () => {
                     (20-200)
                   </span>
                 </div>
+
+                {/* Script Input */}
+                <ScriptInput scriptText={scriptText} onScriptChange={setScriptText} />
 
                 {/* Custom Corrections */}
                 <CustomCorrections
