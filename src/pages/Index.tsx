@@ -437,6 +437,8 @@ const Index = () => {
                 segments={file.segments}
                 onGenerate={(segments) => handleGenerateSRT(file.id, segments)}
                 onCancel={() => handleCancelReview(file.id)}
+                matchRate={file.matchRate}
+                scriptWasUseful={file.scriptWasUseful}
               />
             ))}
           </div>

@@ -13,6 +13,8 @@ interface CaptionEditorProps {
   segments: TranscriptSegment[];
   onGenerate: (segments: TranscriptSegment[]) => void;
   onCancel: () => void;
+  matchRate?: number | null;
+  scriptWasUseful?: boolean;
 }
 
 interface SegmentWithCorrections extends TranscriptSegment {
@@ -74,7 +76,7 @@ function HighlightedText({ text, corrections }: { text: string; corrections?: Co
   );
 }
 
-export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel }: CaptionEditorProps) {
+export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel, matchRate, scriptWasUseful }: CaptionEditorProps) {
   const [segments, setSegments] = useState<SegmentWithCorrections[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
@@ -171,7 +173,16 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
           </Button>
         </div>
       </div>
-      
+
+      {scriptWasUseful === true && matchRate !== null && matchRate !== undefined && matchRate < 0.75 && (
+        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20">
+          <p className="text-xs text-red-500 font-medium">
+            ⚠️ Less than 75% of this file matched the reference script. Please double-check that the correct script was used.
+          </p>
+        </div>
+      )}
+
+
       <CollapsibleContent>
         <div className="border-t border-border">
           <ScrollArea className="h-[400px]">
