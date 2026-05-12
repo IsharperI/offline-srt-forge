@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Check, X, Clock, Edit2, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -84,6 +84,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
   const [editEnd, setEditEnd] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [editError, setEditError] = useState<string>('');
+  const segmentsRef = useRef<SegmentWithCorrections[]>([]);
 
   // Auto-correct segments on initial load
   useEffect(() => {
@@ -95,6 +96,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
         corrections: result.corrections,
       };
     });
+    segmentsRef.current = correctedSegments;
     setSegments(correctedSegments);
   }, [initialSegments]);
 
@@ -124,7 +126,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
     
     // Save user's edited text as-is (no auto-correct on manual edits)
     // Clear corrections since user has manually reviewed/edited
-    setSegments(prev => prev.map((seg, i) => 
+    const newSegments = segments.map((seg, i) => 
       i === editingIndex
         ? { 
             ...seg, 
@@ -134,7 +136,9 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
             corrections: [], // Clear highlights after manual edit
           }
         : seg
-    ));
+    );
+    segmentsRef.current = newSegments;
+    setSegments(newSegments);
     setEditingIndex(null);
   };
 
@@ -144,14 +148,16 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
   };
 
   const deleteSegment = (index: number) => {
-    setSegments(prev => prev.filter((_, i) => i !== index));
+    const newSegments = segments.filter((_, i) => i !== index);
+    segmentsRef.current = newSegments;
+    setSegments(newSegments);
     if (editingIndex === index) {
       setEditingIndex(null);
     }
   };
 
   const handleGenerate = () => {
-    const validSegments = segments.filter(s => s.text.trim());
+    const validSegments = segmentsRef.current.filter(s => s.text.trim());
     onGenerate(validSegments);
   };
 
