@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ChevronDown, Upload, X } from 'lucide-react';
+import { ChevronDown, Upload, X, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -49,7 +49,7 @@ export function ScriptInput({ scriptText, onScriptChange }: ScriptInputProps) {
           <Textarea
             value={scriptText}
             onChange={(e) => onScriptChange(e.target.value)}
-            placeholder="Paste your narration script here..."
+            placeholder="Paste your narration script here. The app will use it to correct spelling and acronyms in your captions. Works best when the script closely matches the audio."
             rows={6}
             className="w-full resize-y"
           />
@@ -88,10 +88,22 @@ export function ScriptInput({ scriptText, onScriptChange }: ScriptInputProps) {
               )}
             </div>
 
-            <span className="text-xs text-muted-foreground">
-              {scriptText.length} characters
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {scriptText.length} characters
+              </span>
+              {scriptText.length > 0 && (
+                <span className="flex items-center gap-1 text-xs text-green-500">
+                  <Check className="w-3 h-3" />
+                  Script ready
+                </span>
+              )}
+            </div>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Tip: Acronyms and proper nouns in your script (e.g. WMATA, BMNT) will be used to correct the transcription.
+          </p>
         </div>
       )}
     </div>
