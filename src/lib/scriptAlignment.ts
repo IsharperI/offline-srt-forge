@@ -321,6 +321,8 @@ export function alignTranscriptionToScript(
     window.endIndex + 1
   );
 
+  console.log('[Alignment] matchRate:', window.matchRate, 'window:', window.startIndex, '-', window.endIndex, 'of', scriptTokens.length, 'script tokens');
+
   if (windowTokens.length === 0) {
     return {
       segments,
@@ -333,6 +335,7 @@ export function alignTranscriptionToScript(
   // We advance a cursor through the window so substitutions stay roughly in order.
   let cursor = 0;
   const SEARCH_RADIUS = 8;
+  const substitutions: { from: string; to: string }[] = [];
 
   const correctedSegments: TranscriptSegment[] = segments.map((seg) => {
     const rawWords = (seg.text ?? "").split(/(\s+)/); // keep whitespace tokens
@@ -366,6 +369,7 @@ export function alignTranscriptionToScript(
 
       if (bestIdx >= 0 && bestSim >= CONFIDENCE_THRESHOLD) {
         cursor = bestIdx + 1;
+        substitutions.push({ from: core, to: windowTokens[bestIdx].original });
         return `${lead}${windowTokens[bestIdx].original}${trail}`;
       }
 
@@ -375,6 +379,8 @@ export function alignTranscriptionToScript(
     // Preserve every timing-related field; only replace `text`.
     return { ...seg, text: newParts.join("") };
   });
+
+  console.log('[Alignment] First substitutions:', substitutions.slice(0, 5));
 
   return {
     segments: correctedSegments,
