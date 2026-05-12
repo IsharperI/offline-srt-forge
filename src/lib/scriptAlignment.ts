@@ -106,6 +106,28 @@ export function phoneticSimilarity(a: string, b: string): number {
     return 0.9;
   }
 
+  // Substring containment (e.g. "walmarta" vs "wmata" is not substring, but
+  // "wmatax" vs "wmata" is).
+  if (x.includes(y) || y.includes(x)) return 0.85;
+
+  // Subsequence: shorter word's characters all appear in order within longer.
+  const [shorter, longer] = x.length < y.length ? [x, y] : [y, x];
+  let si = 0;
+  for (const c of longer) {
+    if (c === shorter[si]) si++;
+    if (si === shorter.length) break;
+  }
+  if (si === shorter.length) return 0.82;
+
+  // Same first & last character and within 4 characters in length.
+  if (
+    x[0] === y[0] &&
+    x[x.length - 1] === y[y.length - 1] &&
+    Math.abs(x.length - y.length) <= 4
+  ) {
+    return 0.78;
+  }
+
   // For very short tokens (acronyms, initials, short names), bigram overlap is
   // unreliable. Fall back to a character-set Jaccard score.
   if (x.length <= 3 || y.length <= 3) {
