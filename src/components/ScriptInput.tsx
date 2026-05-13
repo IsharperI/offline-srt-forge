@@ -102,7 +102,7 @@ export function ScriptInput({ scriptText, onScriptChange }: ScriptInputProps) {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Tip: Acronyms and proper nouns in your script (e.g. WMATA, BMNT) will be used to correct the transcription.
+            Tip: Acronyms and proper nouns in your script will be used to correct the transcription.
           </p>
         </div>
       )}
