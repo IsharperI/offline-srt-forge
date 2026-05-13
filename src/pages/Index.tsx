@@ -78,6 +78,11 @@ const Index = () => {
     });
   }, []);
 
+  const handleResetOptions = useCallback(() => {
+    setScriptText('');
+    setCustomCorrections({});
+  }, []);
+
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
@@ -350,6 +355,18 @@ const Index = () => {
                   onAdd={handleAddCorrection}
                   onRemove={handleRemoveCorrection}
                 />
+
+                {(scriptText !== '' || Object.keys(customCorrections).length > 0) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetOptions}
+                    className="gap-2 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Reset options
+                  </Button>
+                )}
               </div>
             )}
           </div>
