@@ -106,8 +106,8 @@ export function phoneticSimilarity(a: string, b: string): number {
     return 0.9;
   }
 
-  // Substring containment (e.g. "walmarta" vs "wmata" is not substring, but
-  // "wmatax" vs "wmata" is).
+  // Substring containment (e.g. "examplex" vs "example" is not substring, but
+  // "examplex" vs "example" is).
   if (x.includes(y) || y.includes(x)) return 0.85;
 
   // Subsequence: shorter word's characters all appear in order within longer.
