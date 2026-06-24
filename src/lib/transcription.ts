@@ -591,9 +591,18 @@ function processWordsIntoSegments(
   let currentStart = 0;
 
   while (currentStart < words.length) {
-    // Quick check: can all remaining words fit?
+    // Check for a silence-gap break first (hard rule, > 0.4s).
+    let earlyGapEnd = -1;
+    for (let i = currentStart; i < words.length - 1; i++) {
+      if (words[i + 1].start - words[i].end > 0.4) {
+        earlyGapEnd = i;
+        break;
+      }
+    }
+
+    // Quick check: can all remaining words fit AND there's no forced gap break?
     const remainingLength = wordsTextLength(words, currentStart, words.length - 1);
-    if (remainingLength <= maxLength) {
+    if (remainingLength <= maxLength && earlyGapEnd === -1) {
       const segmentWords = words.slice(currentStart);
       segments.push({
         text: segmentWords.map(w => w.word).join(' '),
