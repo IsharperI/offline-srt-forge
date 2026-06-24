@@ -116,7 +116,7 @@ const Index = () => {
       };
 
       // Step A: Raw transcription (pass selected model)
-      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration, scriptText);
+      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration);
 
       // Step B: Sanitization
       let sanitizedSegments = sanitizeSegments(rawSegments);
