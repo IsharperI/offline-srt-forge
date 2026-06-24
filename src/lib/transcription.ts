@@ -539,35 +539,45 @@ function findBestBreakPoint(
 
     if (wordCount < MIN_WORDS_PER_SEGMENT) continue;
 
+    // Grammar guard: skip candidates that would end on a word grammatically
+    // bound to the following one (article, possessive, auxiliary, subject pronoun).
+    const wordHere = words[i].word;
+    const isGrammarUnsafe = isNoBreakAfter(wordHere);
+
     // Priority 1: Sentence-ending punctuation
-    if (endsSentence(words[i].word)) {
+    if (endsSentence(wordHere)) {
       candidates.push({ index: i, priority: 1 });
     }
     // Priority 2: Clause breaks (comma, semicolon, dash)
-    else if (endsWithClauseBreak(words[i].word)) {
+    else if (endsWithClauseBreak(wordHere)) {
       candidates.push({ index: i, priority: 2 });
     }
     // Priority 3: Before a conjunction/preposition (only after SOFT_BREAK_THRESHOLD)
     else if (
       i + 1 < words.length &&
       BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?;:]+$/, '')) &&
-      currentLength >= SOFT_BREAK_THRESHOLD
+      currentLength >= SOFT_BREAK_THRESHOLD &&
+      !isGrammarUnsafe
     ) {
       candidates.push({ index: i, priority: 3 });
     }
   }
 
-  // No candidates: break at last word that fits
+  // No candidates: break at last grammatically-safe word that fits
   if (candidates.length === 0) {
     let lastFit = startIdx;
+    let lastSafe = -1;
     let len = 0;
     for (let i = startIdx; i < words.length; i++) {
       const addLen = (i === startIdx ? 0 : 1) + words[i].word.length;
       if (len + addLen > maxLength && i > startIdx) break;
       len += addLen;
       lastFit = i;
+      if (!isNoBreakAfter(words[i].word) && (i - startIdx + 1) >= MIN_WORDS_PER_SEGMENT) {
+        lastSafe = i;
+      }
     }
-    return lastFit;
+    return lastSafe >= 0 ? lastSafe : lastFit;
   }
 
   const bestPriority = Math.min(...candidates.map(c => c.priority));
@@ -619,6 +629,26 @@ function findBestBreakPoint(
 
   return breakIdx;
 }
+
+// Find the latest word index reachable from startIdx whose end-time keeps the
+// segment duration <= maxDuration. Returns -1 if even the first word exceeds it.
+function findMaxIndexWithinDuration(
+  words: WordTiming[],
+  startIdx: number,
+  maxDuration: number
+): number {
+  const startTime = words[startIdx].start;
+  let lastFit = -1;
+  for (let i = startIdx; i < words.length; i++) {
+    if (words[i].end - startTime <= maxDuration) {
+      lastFit = i;
+    } else {
+      break;
+    }
+  }
+  return lastFit;
+}
+
 
 // Process words into caption segments with semantic break rules
 function processWordsIntoSegments(
