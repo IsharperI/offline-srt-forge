@@ -418,6 +418,11 @@ const DEFAULT_MAX_LINE_LENGTH = 80;
 const MIN_WORDS_PER_SEGMENT = 3;
 const SOFT_BREAK_THRESHOLD = 45;
 
+// Duration targets for captions (seconds)
+const MAX_SEGMENT_DURATION = 5.0;
+const MIN_SEGMENT_DURATION = 1.5;
+const SILENCE_GAP_THRESHOLD = 0.4;
+
 // Conjunctions and prepositions to break BEFORE
 const BREAK_BEFORE_WORDS = new Set([
   'and', 'but', 'so', 'because', 'or', 'yet', 'nor',
@@ -426,6 +431,30 @@ const BREAK_BEFORE_WORDS = new Set([
   'after', 'above', 'below', 'between', 'under', 'over',
   'while', 'although', 'though', 'unless', 'until', 'when',
   'where', 'if', 'then', 'than', 'as', 'since', 'that', 'which'
+]);
+
+// Words that should NEVER end a caption (would split subject/verb,
+// determiner/noun, auxiliary/main-verb, etc.). Only applied when the
+// word has no trailing punctuation that would close the phrase.
+const NO_BREAK_AFTER_WORDS = new Set([
+  // articles & determiners
+  'a', 'an', 'the',
+  // possessives
+  'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  // demonstratives
+  'this', 'that', 'these', 'those',
+  // subject pronouns (avoid splitting subject from verb)
+  'i', 'you', 'he', 'she', 'it', 'we', 'they',
+  // auxiliaries / modals (avoid splitting from main verb)
+  'is', 'are', 'was', 'were', 'am', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did',
+  'will', 'would', 'can', 'could', 'should', 'shall', 'may', 'might', 'must',
+  // negation that pairs with following verb
+  'not', "don't", "doesn't", "didn't", "won't", "wouldn't",
+  "can't", "couldn't", "shouldn't", "isn't", "aren't", "wasn't", "weren't",
+  // quantifiers/adjectives that typically precede a noun
+  'some', 'any', 'no', 'every', 'each', 'all', 'most', 'many', 'few', 'several',
+  'one', 'two', 'three', 'four', 'five',
 ]);
 
 // Short standalone interjections that should NOT be merged
@@ -462,6 +491,17 @@ function isStandaloneInterjection(text: string): boolean {
 function isPrepositionOrConjunction(word: string): boolean {
   return BREAK_BEFORE_WORDS.has(word.toLowerCase().replace(/[.,!?;:]+$/, ''));
 }
+
+// A word that grammatically binds to what follows (article, possessive,
+// auxiliary, subject pronoun, etc.). A break right after it would split
+// a subject from its verb or a determiner from its noun.
+function isNoBreakAfter(word: string): boolean {
+  // If the word carries closing punctuation, the phrase has already closed.
+  if (/[.!?,;:]$/.test(word)) return false;
+  const stripped = word.toLowerCase().replace(/[.,!?;:"')\]]+$/, '');
+  return NO_BREAK_AFTER_WORDS.has(stripped);
+}
+
 
 // Calculate the text length for a range of words
 function wordsTextLength(words: WordTiming[], startIdx: number, endIdx: number): number {
