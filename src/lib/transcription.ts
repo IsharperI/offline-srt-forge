@@ -661,18 +661,25 @@ function processWordsIntoSegments(
   let currentStart = 0;
 
   while (currentStart < words.length) {
-    // Check for a silence-gap break first (hard rule, > 0.4s).
+    // Check for a silence-gap break first (hard rule, > SILENCE_GAP_THRESHOLD).
     let earlyGapEnd = -1;
     for (let i = currentStart; i < words.length - 1; i++) {
-      if (words[i + 1].start - words[i].end > 0.4) {
+      if (words[i + 1].start - words[i].end > SILENCE_GAP_THRESHOLD) {
         earlyGapEnd = i;
         break;
       }
     }
 
-    // Quick check: can all remaining words fit AND there's no forced gap break?
+    // Duration cap: don't let a single caption exceed MAX_SEGMENT_DURATION.
+    const maxDurIdx = findMaxIndexWithinDuration(words, currentStart, MAX_SEGMENT_DURATION);
+
+    // Quick check: can all remaining words fit (length, gap, AND duration)?
     const remainingLength = wordsTextLength(words, currentStart, words.length - 1);
-    if (remainingLength <= maxLength && earlyGapEnd === -1) {
+    if (
+      remainingLength <= maxLength &&
+      earlyGapEnd === -1 &&
+      maxDurIdx === words.length - 1
+    ) {
       const segmentWords = words.slice(currentStart);
       segments.push({
         text: segmentWords.map(w => w.word).join(' '),
@@ -682,16 +689,8 @@ function processWordsIntoSegments(
       break;
     }
 
-    // HARD RULE: force a segment break on any silence gap > 0.4s between words.
-    // This overrides character-count and semantic-break preferences.
-    let forcedGapEnd = -1;
-    for (let i = currentStart; i < words.length - 1; i++) {
-      const gap = words[i + 1].start - words[i].end;
-      if (gap > 0.4) {
-        forcedGapEnd = i;
-        break;
-      }
-    }
+    // HARD RULE: force a segment break on any silence gap > threshold between words.
+    const forcedGapEnd = earlyGapEnd;
 
     // Scan for the FIRST sentence-ending punctuation within maxLength
     let firstSentenceEnd = -1;
@@ -721,6 +720,41 @@ function processWordsIntoSegments(
 
     if (segmentEnd < currentStart) segmentEnd = currentStart;
 
+    // Duration cap (3–5s target): if chosen end exceeds 5s, force an earlier
+    // natural break inside the duration window.
+    if (maxDurIdx >= currentStart && segmentEnd > maxDurIdx) {
+      // Search for the latest sentence-end inside the window
+      let sentenceIdx = -1;
+      let clauseIdx = -1;
+      let conjunctionIdx = -1;
+      for (let i = currentStart; i <= maxDurIdx; i++) {
+        if ((i - currentStart + 1) < MIN_WORDS_PER_SEGMENT) continue;
+        const w = words[i].word;
+        if (endsSentence(w)) sentenceIdx = i;
+        else if (endsWithClauseBreak(w)) clauseIdx = i;
+        else if (
+          i + 1 < words.length &&
+          BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?;:]+$/, '')) &&
+          !isNoBreakAfter(w)
+        ) {
+          conjunctionIdx = i;
+        }
+      }
+      // Latest safe word-boundary inside the window (grammar-aware fallback)
+      let safeWordIdx = -1;
+      for (let i = currentStart; i <= maxDurIdx; i++) {
+        if ((i - currentStart + 1) >= MIN_WORDS_PER_SEGMENT && !isNoBreakAfter(words[i].word)) {
+          safeWordIdx = i;
+        }
+      }
+
+      if (sentenceIdx >= 0) segmentEnd = sentenceIdx;
+      else if (clauseIdx >= 0) segmentEnd = clauseIdx;
+      else if (conjunctionIdx >= 0) segmentEnd = conjunctionIdx;
+      else if (safeWordIdx >= 0) segmentEnd = safeWordIdx;
+      else segmentEnd = maxDurIdx;
+    }
+
     const segmentWords = words.slice(currentStart, segmentEnd + 1);
     segments.push({
       text: segmentWords.map(w => w.word).join(' '),
@@ -733,6 +767,62 @@ function processWordsIntoSegments(
 
   return segments;
 }
+
+// Merge segments shorter than MIN_SEGMENT_DURATION into a neighbour, as long
+// as: (a) the merge doesn't cross a silence gap > SILENCE_GAP_THRESHOLD, and
+// (b) the resulting segment stays within MAX_SEGMENT_DURATION. The final
+// caption is allowed to remain short.
+function mergeShortSegments(segments: CaptionSegment[]): CaptionSegment[] {
+  if (segments.length <= 1) return segments;
+  const result: CaptionSegment[] = segments.map(s => ({ ...s }));
+
+  let i = 0;
+  while (i < result.length) {
+    const seg = result[i];
+    const duration = seg.end - seg.start;
+    const isLast = i === result.length - 1;
+
+    if (duration >= MIN_SEGMENT_DURATION || isLast) {
+      i++;
+      continue;
+    }
+
+    // Try merging with NEXT first (preferred)
+    const next = result[i + 1];
+    const gapToNext = next.start - seg.end;
+    const combinedDurNext = next.end - seg.start;
+    if (gapToNext <= SILENCE_GAP_THRESHOLD && combinedDurNext <= MAX_SEGMENT_DURATION) {
+      result.splice(i, 2, {
+        text: seg.text + ' ' + next.text,
+        start: seg.start,
+        end: next.end,
+      });
+      continue; // re-check the merged segment
+    }
+
+    // Else try PREVIOUS
+    if (i > 0) {
+      const prev = result[i - 1];
+      const gapFromPrev = seg.start - prev.end;
+      const combinedDurPrev = seg.end - prev.start;
+      if (gapFromPrev <= SILENCE_GAP_THRESHOLD && combinedDurPrev <= MAX_SEGMENT_DURATION) {
+        result.splice(i - 1, 2, {
+          text: prev.text + ' ' + seg.text,
+          start: prev.start,
+          end: seg.end,
+        });
+        i = Math.max(0, i - 1);
+        continue;
+      }
+    }
+
+    // Cannot safely merge — leave as is.
+    i++;
+  }
+
+  return result;
+}
+
 
 // Apply anti-orphan logic (3-word rule)
 function applyAntiOrphanLogic(segments: CaptionSegment[]): CaptionSegment[] {
