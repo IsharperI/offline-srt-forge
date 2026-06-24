@@ -418,6 +418,11 @@ const DEFAULT_MAX_LINE_LENGTH = 80;
 const MIN_WORDS_PER_SEGMENT = 3;
 const SOFT_BREAK_THRESHOLD = 45;
 
+// Duration targets for captions (seconds)
+const MAX_SEGMENT_DURATION = 5.0;
+const MIN_SEGMENT_DURATION = 1.5;
+const SILENCE_GAP_THRESHOLD = 0.4;
+
 // Conjunctions and prepositions to break BEFORE
 const BREAK_BEFORE_WORDS = new Set([
   'and', 'but', 'so', 'because', 'or', 'yet', 'nor',
@@ -426,6 +431,30 @@ const BREAK_BEFORE_WORDS = new Set([
   'after', 'above', 'below', 'between', 'under', 'over',
   'while', 'although', 'though', 'unless', 'until', 'when',
   'where', 'if', 'then', 'than', 'as', 'since', 'that', 'which'
+]);
+
+// Words that should NEVER end a caption (would split subject/verb,
+// determiner/noun, auxiliary/main-verb, etc.). Only applied when the
+// word has no trailing punctuation that would close the phrase.
+const NO_BREAK_AFTER_WORDS = new Set([
+  // articles & determiners
+  'a', 'an', 'the',
+  // possessives
+  'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  // demonstratives
+  'this', 'that', 'these', 'those',
+  // subject pronouns (avoid splitting subject from verb)
+  'i', 'you', 'he', 'she', 'it', 'we', 'they',
+  // auxiliaries / modals (avoid splitting from main verb)
+  'is', 'are', 'was', 'were', 'am', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did',
+  'will', 'would', 'can', 'could', 'should', 'shall', 'may', 'might', 'must',
+  // negation that pairs with following verb
+  'not', "don't", "doesn't", "didn't", "won't", "wouldn't",
+  "can't", "couldn't", "shouldn't", "isn't", "aren't", "wasn't", "weren't",
+  // quantifiers/adjectives that typically precede a noun
+  'some', 'any', 'no', 'every', 'each', 'all', 'most', 'many', 'few', 'several',
+  'one', 'two', 'three', 'four', 'five',
 ]);
 
 // Short standalone interjections that should NOT be merged
@@ -463,6 +492,17 @@ function isPrepositionOrConjunction(word: string): boolean {
   return BREAK_BEFORE_WORDS.has(word.toLowerCase().replace(/[.,!?;:]+$/, ''));
 }
 
+// A word that grammatically binds to what follows (article, possessive,
+// auxiliary, subject pronoun, etc.). A break right after it would split
+// a subject from its verb or a determiner from its noun.
+function isNoBreakAfter(word: string): boolean {
+  // If the word carries closing punctuation, the phrase has already closed.
+  if (/[.!?,;:]$/.test(word)) return false;
+  const stripped = word.toLowerCase().replace(/[.,!?;:"')\]]+$/, '');
+  return NO_BREAK_AFTER_WORDS.has(stripped);
+}
+
+
 // Calculate the text length for a range of words
 function wordsTextLength(words: WordTiming[], startIdx: number, endIdx: number): number {
   let len = 0;
@@ -499,35 +539,45 @@ function findBestBreakPoint(
 
     if (wordCount < MIN_WORDS_PER_SEGMENT) continue;
 
+    // Grammar guard: skip candidates that would end on a word grammatically
+    // bound to the following one (article, possessive, auxiliary, subject pronoun).
+    const wordHere = words[i].word;
+    const isGrammarUnsafe = isNoBreakAfter(wordHere);
+
     // Priority 1: Sentence-ending punctuation
-    if (endsSentence(words[i].word)) {
+    if (endsSentence(wordHere)) {
       candidates.push({ index: i, priority: 1 });
     }
     // Priority 2: Clause breaks (comma, semicolon, dash)
-    else if (endsWithClauseBreak(words[i].word)) {
+    else if (endsWithClauseBreak(wordHere)) {
       candidates.push({ index: i, priority: 2 });
     }
     // Priority 3: Before a conjunction/preposition (only after SOFT_BREAK_THRESHOLD)
     else if (
       i + 1 < words.length &&
       BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?;:]+$/, '')) &&
-      currentLength >= SOFT_BREAK_THRESHOLD
+      currentLength >= SOFT_BREAK_THRESHOLD &&
+      !isGrammarUnsafe
     ) {
       candidates.push({ index: i, priority: 3 });
     }
   }
 
-  // No candidates: break at last word that fits
+  // No candidates: break at last grammatically-safe word that fits
   if (candidates.length === 0) {
     let lastFit = startIdx;
+    let lastSafe = -1;
     let len = 0;
     for (let i = startIdx; i < words.length; i++) {
       const addLen = (i === startIdx ? 0 : 1) + words[i].word.length;
       if (len + addLen > maxLength && i > startIdx) break;
       len += addLen;
       lastFit = i;
+      if (!isNoBreakAfter(words[i].word) && (i - startIdx + 1) >= MIN_WORDS_PER_SEGMENT) {
+        lastSafe = i;
+      }
     }
-    return lastFit;
+    return lastSafe >= 0 ? lastSafe : lastFit;
   }
 
   const bestPriority = Math.min(...candidates.map(c => c.priority));
@@ -580,6 +630,26 @@ function findBestBreakPoint(
   return breakIdx;
 }
 
+// Find the latest word index reachable from startIdx whose end-time keeps the
+// segment duration <= maxDuration. Returns -1 if even the first word exceeds it.
+function findMaxIndexWithinDuration(
+  words: WordTiming[],
+  startIdx: number,
+  maxDuration: number
+): number {
+  const startTime = words[startIdx].start;
+  let lastFit = -1;
+  for (let i = startIdx; i < words.length; i++) {
+    if (words[i].end - startTime <= maxDuration) {
+      lastFit = i;
+    } else {
+      break;
+    }
+  }
+  return lastFit;
+}
+
+
 // Process words into caption segments with semantic break rules
 function processWordsIntoSegments(
   words: WordTiming[],
@@ -591,18 +661,25 @@ function processWordsIntoSegments(
   let currentStart = 0;
 
   while (currentStart < words.length) {
-    // Check for a silence-gap break first (hard rule, > 0.4s).
+    // Check for a silence-gap break first (hard rule, > SILENCE_GAP_THRESHOLD).
     let earlyGapEnd = -1;
     for (let i = currentStart; i < words.length - 1; i++) {
-      if (words[i + 1].start - words[i].end > 0.4) {
+      if (words[i + 1].start - words[i].end > SILENCE_GAP_THRESHOLD) {
         earlyGapEnd = i;
         break;
       }
     }
 
-    // Quick check: can all remaining words fit AND there's no forced gap break?
+    // Duration cap: don't let a single caption exceed MAX_SEGMENT_DURATION.
+    const maxDurIdx = findMaxIndexWithinDuration(words, currentStart, MAX_SEGMENT_DURATION);
+
+    // Quick check: can all remaining words fit (length, gap, AND duration)?
     const remainingLength = wordsTextLength(words, currentStart, words.length - 1);
-    if (remainingLength <= maxLength && earlyGapEnd === -1) {
+    if (
+      remainingLength <= maxLength &&
+      earlyGapEnd === -1 &&
+      maxDurIdx === words.length - 1
+    ) {
       const segmentWords = words.slice(currentStart);
       segments.push({
         text: segmentWords.map(w => w.word).join(' '),
@@ -612,16 +689,8 @@ function processWordsIntoSegments(
       break;
     }
 
-    // HARD RULE: force a segment break on any silence gap > 0.4s between words.
-    // This overrides character-count and semantic-break preferences.
-    let forcedGapEnd = -1;
-    for (let i = currentStart; i < words.length - 1; i++) {
-      const gap = words[i + 1].start - words[i].end;
-      if (gap > 0.4) {
-        forcedGapEnd = i;
-        break;
-      }
-    }
+    // HARD RULE: force a segment break on any silence gap > threshold between words.
+    const forcedGapEnd = earlyGapEnd;
 
     // Scan for the FIRST sentence-ending punctuation within maxLength
     let firstSentenceEnd = -1;
@@ -651,6 +720,41 @@ function processWordsIntoSegments(
 
     if (segmentEnd < currentStart) segmentEnd = currentStart;
 
+    // Duration cap (3–5s target): if chosen end exceeds 5s, force an earlier
+    // natural break inside the duration window.
+    if (maxDurIdx >= currentStart && segmentEnd > maxDurIdx) {
+      // Search for the latest sentence-end inside the window
+      let sentenceIdx = -1;
+      let clauseIdx = -1;
+      let conjunctionIdx = -1;
+      for (let i = currentStart; i <= maxDurIdx; i++) {
+        if ((i - currentStart + 1) < MIN_WORDS_PER_SEGMENT) continue;
+        const w = words[i].word;
+        if (endsSentence(w)) sentenceIdx = i;
+        else if (endsWithClauseBreak(w)) clauseIdx = i;
+        else if (
+          i + 1 < words.length &&
+          BREAK_BEFORE_WORDS.has(words[i + 1].word.toLowerCase().replace(/[.,!?;:]+$/, '')) &&
+          !isNoBreakAfter(w)
+        ) {
+          conjunctionIdx = i;
+        }
+      }
+      // Latest safe word-boundary inside the window (grammar-aware fallback)
+      let safeWordIdx = -1;
+      for (let i = currentStart; i <= maxDurIdx; i++) {
+        if ((i - currentStart + 1) >= MIN_WORDS_PER_SEGMENT && !isNoBreakAfter(words[i].word)) {
+          safeWordIdx = i;
+        }
+      }
+
+      if (sentenceIdx >= 0) segmentEnd = sentenceIdx;
+      else if (clauseIdx >= 0) segmentEnd = clauseIdx;
+      else if (conjunctionIdx >= 0) segmentEnd = conjunctionIdx;
+      else if (safeWordIdx >= 0) segmentEnd = safeWordIdx;
+      else segmentEnd = maxDurIdx;
+    }
+
     const segmentWords = words.slice(currentStart, segmentEnd + 1);
     segments.push({
       text: segmentWords.map(w => w.word).join(' '),
@@ -663,6 +767,62 @@ function processWordsIntoSegments(
 
   return segments;
 }
+
+// Merge segments shorter than MIN_SEGMENT_DURATION into a neighbour, as long
+// as: (a) the merge doesn't cross a silence gap > SILENCE_GAP_THRESHOLD, and
+// (b) the resulting segment stays within MAX_SEGMENT_DURATION. The final
+// caption is allowed to remain short.
+function mergeShortSegments(segments: CaptionSegment[]): CaptionSegment[] {
+  if (segments.length <= 1) return segments;
+  const result: CaptionSegment[] = segments.map(s => ({ ...s }));
+
+  let i = 0;
+  while (i < result.length) {
+    const seg = result[i];
+    const duration = seg.end - seg.start;
+    const isLast = i === result.length - 1;
+
+    if (duration >= MIN_SEGMENT_DURATION || isLast) {
+      i++;
+      continue;
+    }
+
+    // Try merging with NEXT first (preferred)
+    const next = result[i + 1];
+    const gapToNext = next.start - seg.end;
+    const combinedDurNext = next.end - seg.start;
+    if (gapToNext <= SILENCE_GAP_THRESHOLD && combinedDurNext <= MAX_SEGMENT_DURATION) {
+      result.splice(i, 2, {
+        text: seg.text + ' ' + next.text,
+        start: seg.start,
+        end: next.end,
+      });
+      continue; // re-check the merged segment
+    }
+
+    // Else try PREVIOUS
+    if (i > 0) {
+      const prev = result[i - 1];
+      const gapFromPrev = seg.start - prev.end;
+      const combinedDurPrev = seg.end - prev.start;
+      if (gapFromPrev <= SILENCE_GAP_THRESHOLD && combinedDurPrev <= MAX_SEGMENT_DURATION) {
+        result.splice(i - 1, 2, {
+          text: prev.text + ' ' + seg.text,
+          start: prev.start,
+          end: seg.end,
+        });
+        i = Math.max(0, i - 1);
+        continue;
+      }
+    }
+
+    // Cannot safely merge — leave as is.
+    i++;
+  }
+
+  return result;
+}
+
 
 // Apply anti-orphan logic (3-word rule)
 function applyAntiOrphanLogic(segments: CaptionSegment[]): CaptionSegment[] {
@@ -735,10 +895,12 @@ function buildCaptionSegments(
   if (allWords.length === 0) return [];
 
   const rawSegments = processWordsIntoSegments(allWords, maxLength);
-  const finalSegments = applyAntiOrphanLogic(rawSegments);
+  const orphanFixed = applyAntiOrphanLogic(rawSegments);
+  const finalSegments = mergeShortSegments(orphanFixed);
 
   return finalSegments;
 }
+
 
 // Convert CaptionSegment array to TranscriptSegment array
 function captionsToTranscriptSegments(captions: CaptionSegment[]): TranscriptSegment[] {
