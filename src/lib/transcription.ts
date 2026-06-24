@@ -895,10 +895,12 @@ function buildCaptionSegments(
   if (allWords.length === 0) return [];
 
   const rawSegments = processWordsIntoSegments(allWords, maxLength);
-  const finalSegments = applyAntiOrphanLogic(rawSegments);
+  const orphanFixed = applyAntiOrphanLogic(rawSegments);
+  const finalSegments = mergeShortSegments(orphanFixed);
 
   return finalSegments;
 }
+
 
 // Convert CaptionSegment array to TranscriptSegment array
 function captionsToTranscriptSegments(captions: CaptionSegment[]): TranscriptSegment[] {
