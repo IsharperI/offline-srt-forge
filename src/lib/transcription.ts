@@ -192,7 +192,8 @@ export async function transcribeAudio(
   audioFile: File,
   onProgress?: (progress: TranscriptionProgress) => void,
   modelId?: string,
-  audioDuration?: number
+  audioDuration?: number,
+  scriptText?: string
 ): Promise<TranscriptSegment[]> {
   const targetModel = modelId || 'onnx-community/whisper-tiny.en';
   
@@ -228,15 +229,45 @@ export async function transcribeAudio(
   
   const audioUrl = URL.createObjectURL(processedBlob);
   
+  // Build an initial prompt for Whisper from the first ~250 words of the script.
+  // @huggingface/transformers v3 exposes WhisperTokenizer.get_prompt_ids which
+  // returns the token IDs to feed via generation_kwargs.prompt_ids.
+  let promptIds: unknown = null;
+  if (scriptText && scriptText.trim()) {
+    try {
+      const words = scriptText.trim().split(/\s+/).slice(0, 250);
+      const promptText = words.join(' ');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tokenizer: any = (transcriber as any)?.tokenizer;
+      if (tokenizer && typeof tokenizer.get_prompt_ids === 'function') {
+        promptIds = await tokenizer.get_prompt_ids(promptText);
+        console.log('[Whisper] Using initial prompt from script:', promptText.slice(0, 120) + (promptText.length > 120 ? '…' : ''));
+      } else {
+        console.warn('[Whisper] tokenizer.get_prompt_ids unavailable on installed @huggingface/transformers; skipping initial prompt');
+      }
+    } catch (err) {
+      console.warn('[Whisper] Failed to build prompt_ids from script:', err);
+      promptIds = null;
+    }
+  }
+  
   try {
     onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const callOpts: any = {
+      return_timestamps: true,
+      chunk_length_s: 30,
+      stride_length_s: 3,
+    };
+    if (promptIds) {
+      callOpts.generation_kwargs = { prompt_ids: promptIds };
+      // Some versions read prompt_ids at the top level instead.
+      callOpts.prompt_ids = promptIds;
+    }
+    
     const result = await withTimeout(
-      transcriber!(audioUrl, {
-        return_timestamps: true,
-        chunk_length_s: 30,
-        stride_length_s: 3,
-      }) as Promise<AutomaticSpeechRecognitionOutput>,
+      transcriber!(audioUrl, callOpts) as Promise<AutomaticSpeechRecognitionOutput>,
       TRANSCRIPTION_TIMEOUT_MS,
       audioFile.name
     );
@@ -560,9 +591,18 @@ function processWordsIntoSegments(
   let currentStart = 0;
 
   while (currentStart < words.length) {
-    // Quick check: can all remaining words fit?
+    // Check for a silence-gap break first (hard rule, > 0.4s).
+    let earlyGapEnd = -1;
+    for (let i = currentStart; i < words.length - 1; i++) {
+      if (words[i + 1].start - words[i].end > 0.4) {
+        earlyGapEnd = i;
+        break;
+      }
+    }
+
+    // Quick check: can all remaining words fit AND there's no forced gap break?
     const remainingLength = wordsTextLength(words, currentStart, words.length - 1);
-    if (remainingLength <= maxLength) {
+    if (remainingLength <= maxLength && earlyGapEnd === -1) {
       const segmentWords = words.slice(currentStart);
       segments.push({
         text: segmentWords.map(w => w.word).join(' '),
@@ -570,6 +610,17 @@ function processWordsIntoSegments(
         end: segmentWords[segmentWords.length - 1].end,
       });
       break;
+    }
+
+    // HARD RULE: force a segment break on any silence gap > 0.4s between words.
+    // This overrides character-count and semantic-break preferences.
+    let forcedGapEnd = -1;
+    for (let i = currentStart; i < words.length - 1; i++) {
+      const gap = words[i + 1].start - words[i].end;
+      if (gap > 0.4) {
+        forcedGapEnd = i;
+        break;
+      }
     }
 
     // Scan for the FIRST sentence-ending punctuation within maxLength
@@ -588,7 +639,10 @@ function processWordsIntoSegments(
 
     let segmentEnd: number;
 
-    if (firstSentenceEnd >= 0) {
+    if (forcedGapEnd >= 0 && (firstSentenceEnd < 0 || forcedGapEnd <= firstSentenceEnd)) {
+      // Hard silence-gap break wins over everything else.
+      segmentEnd = forcedGapEnd;
+    } else if (firstSentenceEnd >= 0) {
       segmentEnd = firstSentenceEnd;
     } else {
       // No sentence-ending punctuation within limit — use semantic break finding
