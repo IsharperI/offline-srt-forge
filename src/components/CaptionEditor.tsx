@@ -280,7 +280,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
                         </div>
                       </div>
                       <p className="text-sm text-foreground">
-                        <HighlightedText text={segment.text} corrections={segment.corrections} />
+                        <HighlightedText text={segment.text} corrections={segment.corrections} customCorrections={customCorrections} />
                       </p>
                     </div>
                   )}
