@@ -467,6 +467,7 @@ const Index = () => {
                 onCancel={() => handleCancelReview(file.id)}
                 matchRate={file.matchRate}
                 scriptWasUseful={file.scriptWasUseful}
+                customCorrections={customCorrections}
               />
             ))}
           </div>
