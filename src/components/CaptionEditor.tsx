@@ -97,7 +97,7 @@ function HighlightedText({
   );
 }
 
-export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel, matchRate, scriptWasUseful }: CaptionEditorProps) {
+export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel, matchRate, scriptWasUseful, customCorrections }: CaptionEditorProps) {
   const [segments, setSegments] = useState<SegmentWithCorrections[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
