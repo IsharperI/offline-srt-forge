@@ -216,6 +216,13 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
           </p>
         </div>
       )}
+      {scriptWasUseful === true && matchRate !== null && matchRate !== undefined && matchRate >= 0.75 && (
+        <div className="px-4 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
+          <p className="text-xs text-emerald-500 font-medium">
+            Reference script applied — {(matchRate * 100).toFixed(0)}% match
+          </p>
+        </div>
+      )}
 
 
       <CollapsibleContent>
