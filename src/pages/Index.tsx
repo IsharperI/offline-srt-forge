@@ -127,16 +127,9 @@ const Index = () => {
         sanitizedSegments = alignmentResult.segments;
       }
 
-      const correctedSegments = sanitizedSegments.map(segment => {
-        let text = segment.text;
-        Object.entries(customCorrections).forEach(([from, to]) => {
-          const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-          text = text.replace(regex, to);
-        });
-        return { ...segment, text };
-      });
-
       // Move to review state (instead of directly generating SRT)
+      // Note: custom corrections are applied at SRT generation time (handleGenerateSRT),
+      // not here, so they always use the latest customCorrections state.
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
       setReviewFiles(prev => [
         ...prev,
@@ -144,7 +137,7 @@ const Index = () => {
           id: fileId,
           filename: file.name,
           duration,
-          segments: correctedSegments,
+          segments: sanitizedSegments,
           matchRate: alignmentResult?.matchRate ?? null,
           scriptWasUseful: alignmentResult?.scriptWasUseful ?? false,
         },
