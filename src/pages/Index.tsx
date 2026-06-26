@@ -214,8 +214,22 @@ const Index = () => {
     const reviewFile = reviewFiles.find(f => f.id === fileId);
     if (!reviewFile) return;
 
+    // Apply custom corrections now (using the latest state) so download-time
+    // corrections aren't stale from when the file was originally queued.
+    const correctionEntries = Object.entries(customCorrections);
+    const correctedSegments = correctionEntries.length === 0
+      ? editedSegments
+      : editedSegments.map(segment => {
+          let text = segment.text;
+          correctionEntries.forEach(([from, to]) => {
+            const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            text = text.replace(regex, to);
+          });
+          return { ...segment, text };
+        });
+
     // Step C: Generate SRT (with re-indexing, duration clamping, and char limit)
-    const srtContent = generateSRT(editedSegments, reviewFile.duration, maxCharLimit);
+    const srtContent = generateSRT(correctedSegments, reviewFile.duration, maxCharLimit);
 
     // Move to completed
     setReviewFiles(prev => prev.filter(f => f.id !== fileId));
@@ -228,7 +242,7 @@ const Index = () => {
         srtContent,
       },
     ]);
-  }, [reviewFiles, maxCharLimit]);
+  }, [reviewFiles, maxCharLimit, customCorrections]);
 
   const handleCancelReview = (fileId: string) => {
     setReviewFiles(prev => prev.filter(f => f.id !== fileId));
