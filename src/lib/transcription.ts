@@ -667,23 +667,25 @@ function buildCaptionSegments(
   segments: TranscriptSegment[],
   maxLength: number
 ): CaptionSegment[] {
-  const allWords: WordTiming[] = [];
+  const result: CaptionSegment[] = [];
 
   for (const segment of segments) {
-    if (segment.words && segment.words.length > 0) {
-      allWords.push(...segment.words);
+    if (!segment.words || segment.words.length === 0) {
+      // No word-level timing — preserve the segment as-is (e.g., edited in the caption editor)
+      result.push({
+        text: segment.text,
+        start: segment.startTime,
+        end: segment.endTime,
+      });
     } else {
-      const estimated = estimateWordTimings(segment.text, segment.startTime, segment.endTime);
-      allWords.push(...estimated);
+      // Re-segment using word-level timings
+      const rawSegments = processWordsIntoSegments(segment.words, maxLength);
+      const finalSegments = applyAntiOrphanLogic(rawSegments);
+      result.push(...finalSegments);
     }
   }
 
-  if (allWords.length === 0) return [];
-
-  const rawSegments = processWordsIntoSegments(allWords, maxLength);
-  const finalSegments = applyAntiOrphanLogic(rawSegments);
-
-  return finalSegments;
+  return result;
 }
 
 // Convert CaptionSegment array to TranscriptSegment array
