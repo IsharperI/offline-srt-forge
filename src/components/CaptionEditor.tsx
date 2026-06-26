@@ -15,6 +15,7 @@ interface CaptionEditorProps {
   onCancel: () => void;
   matchRate?: number | null;
   scriptWasUseful?: boolean;
+  customCorrections?: Record<string, string>;
 }
 
 interface SegmentWithCorrections extends TranscriptSegment {
@@ -38,30 +39,50 @@ const parseTimestamp = (value: string): number | null => {
   return isNaN(num) ? null : num;
 };
 
-// Render text with corrected words highlighted in pink
-function HighlightedText({ text, corrections }: { text: string; corrections?: CorrectionResult['corrections'] }) {
-  if (!corrections || corrections.length === 0) {
+// Render text with corrected words highlighted in pink (dictionary autoCorrect)
+// and amber/yellow (user-defined custom corrections).
+function HighlightedText({
+  text,
+  corrections,
+  customCorrections,
+}: {
+  text: string;
+  corrections?: CorrectionResult['corrections'];
+  customCorrections?: Record<string, string>;
+}) {
+  const correctedWords = new Set((corrections ?? []).map(c => c.corrected.toLowerCase()));
+  const customKeys = new Set(Object.keys(customCorrections ?? {}).map(k => k.toLowerCase()));
+
+  if (correctedWords.size === 0 && customKeys.size === 0) {
     return <>{text}</>;
   }
-  
-  // Get the corrected words to highlight
-  const correctedWords = new Set(corrections.map(c => c.corrected.toLowerCase()));
-  
+
   // Split text into words and whitespace, preserving both
   const parts = text.split(/(\s+)/);
-  
+
   return (
     <>
       {parts.map((part, index) => {
         const isWord = part.trim().length > 0;
-        const isCorrected = isWord && correctedWords.has(part.toLowerCase());
-        
-        if (isCorrected) {
-          // Remove from set to handle duplicates (only highlight first occurrence per correction)
-          correctedWords.delete(part.toLowerCase());
+        const lower = part.toLowerCase();
+
+        if (isWord && customKeys.has(lower)) {
           return (
-            <span 
-              key={index} 
+            <span
+              key={index}
+              className="text-amber-500 font-medium"
+              title="Custom correction match"
+            >
+              {part}
+            </span>
+          );
+        }
+
+        if (isWord && correctedWords.has(lower)) {
+          correctedWords.delete(lower);
+          return (
+            <span
+              key={index}
               className="text-pink-500 font-medium"
               title="Auto-corrected"
             >
@@ -69,14 +90,14 @@ function HighlightedText({ text, corrections }: { text: string; corrections?: Co
             </span>
           );
         }
-        
+
         return <span key={index}>{part}</span>;
       })}
     </>
   );
 }
 
-export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel, matchRate, scriptWasUseful }: CaptionEditorProps) {
+export function CaptionEditor({ filename, segments: initialSegments, onGenerate, onCancel, matchRate, scriptWasUseful, customCorrections }: CaptionEditorProps) {
   const [segments, setSegments] = useState<SegmentWithCorrections[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
@@ -259,7 +280,7 @@ export function CaptionEditor({ filename, segments: initialSegments, onGenerate,
                         </div>
                       </div>
                       <p className="text-sm text-foreground">
-                        <HighlightedText text={segment.text} corrections={segment.corrections} />
+                        <HighlightedText text={segment.text} corrections={segment.corrections} customCorrections={customCorrections} />
                       </p>
                     </div>
                   )}

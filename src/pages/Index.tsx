@@ -127,16 +127,9 @@ const Index = () => {
         sanitizedSegments = alignmentResult.segments;
       }
 
-      const correctedSegments = sanitizedSegments.map(segment => {
-        let text = segment.text;
-        Object.entries(customCorrections).forEach(([from, to]) => {
-          const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-          text = text.replace(regex, to);
-        });
-        return { ...segment, text };
-      });
-
       // Move to review state (instead of directly generating SRT)
+      // Note: custom corrections are applied at SRT generation time (handleGenerateSRT),
+      // not here, so they always use the latest customCorrections state.
       setProcessingFiles(prev => prev.filter(f => f.id !== fileId));
       setReviewFiles(prev => [
         ...prev,
@@ -144,7 +137,7 @@ const Index = () => {
           id: fileId,
           filename: file.name,
           duration,
-          segments: correctedSegments,
+          segments: sanitizedSegments,
           matchRate: alignmentResult?.matchRate ?? null,
           scriptWasUseful: alignmentResult?.scriptWasUseful ?? false,
         },
@@ -187,7 +180,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [selectedModel, customCorrections, scriptText]);
+  }, [selectedModel, scriptText]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -221,8 +214,22 @@ const Index = () => {
     const reviewFile = reviewFiles.find(f => f.id === fileId);
     if (!reviewFile) return;
 
+    // Apply custom corrections now (using the latest state) so download-time
+    // corrections aren't stale from when the file was originally queued.
+    const correctionEntries = Object.entries(customCorrections);
+    const correctedSegments = correctionEntries.length === 0
+      ? editedSegments
+      : editedSegments.map(segment => {
+          let text = segment.text;
+          correctionEntries.forEach(([from, to]) => {
+            const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            text = text.replace(regex, to);
+          });
+          return { ...segment, text };
+        });
+
     // Step C: Generate SRT (with re-indexing, duration clamping, and char limit)
-    const srtContent = generateSRT(editedSegments, reviewFile.duration, maxCharLimit);
+    const srtContent = generateSRT(correctedSegments, reviewFile.duration, maxCharLimit);
 
     // Move to completed
     setReviewFiles(prev => prev.filter(f => f.id !== fileId));
@@ -235,7 +242,7 @@ const Index = () => {
         srtContent,
       },
     ]);
-  }, [reviewFiles, maxCharLimit]);
+  }, [reviewFiles, maxCharLimit, customCorrections]);
 
   const handleCancelReview = (fileId: string) => {
     setReviewFiles(prev => prev.filter(f => f.id !== fileId));
@@ -460,6 +467,7 @@ const Index = () => {
                 onCancel={() => handleCancelReview(file.id)}
                 matchRate={file.matchRate}
                 scriptWasUseful={file.scriptWasUseful}
+                customCorrections={customCorrections}
               />
             ))}
           </div>
