@@ -15,6 +15,7 @@ interface CaptionEditorProps {
   onCancel: () => void;
   matchRate?: number | null;
   scriptWasUseful?: boolean;
+  customCorrections?: Record<string, string>;
 }
 
 interface SegmentWithCorrections extends TranscriptSegment {
