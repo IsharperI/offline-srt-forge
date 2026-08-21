@@ -240,6 +240,8 @@ export async function transcribeAudio(
     };
     if (!isEnglishOnly) {
       callOptions.task = 'transcribe';
+      callOptions.repetition_penalty = 1.3;
+      callOptions.no_repeat_ngram_size = 3;
       if (sourceLanguage) {
         callOptions.language = sourceLanguage;
       }

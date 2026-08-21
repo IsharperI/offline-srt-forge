@@ -34,33 +34,33 @@ export interface ModelOption {
 export const PRESET_MODELS: ModelOption[] = [
   {
     id: 'onnx-community/whisper-base.en',
-    name: 'Whisper Base (English)',
-    description: 'Good accuracy, English-only (~140MB)',
+    name: 'Whisper 140MB (English-only)',
+    description: 'Good accuracy, English-only',
   },
   {
     id: 'onnx-community/whisper-base',
-    name: 'Whisper Base (Multilingual)',
-    description: 'Good accuracy, 99 languages (~140MB)',
+    name: 'Whisper 140MB (Multilingual)',
+    description: 'Good accuracy, 99 languages',
   },
   {
     id: 'onnx-community/whisper-tiny.en',
-    name: 'Whisper Tiny (English)',
-    description: 'Fast, English-only (~40MB)',
+    name: 'Whisper 40MB (English-only)',
+    description: 'Fast, English-only',
   },
   {
     id: 'onnx-community/whisper-tiny',
-    name: 'Whisper Tiny (Multilingual)',
-    description: 'Fast, supports 99 languages (~40MB)',
+    name: 'Whisper 40MB (Multilingual)',
+    description: 'Fast, supports 99 languages',
   },
   {
     id: 'onnx-community/whisper-small.en',
-    name: 'Whisper Small (English)',
-    description: 'Balanced speed/accuracy, English-only (~240MB)',
+    name: 'Whisper 240MB (English-only)',
+    description: 'Balanced speed/accuracy, English-only',
   },
   {
     id: 'onnx-community/whisper-small',
-    name: 'Whisper Small (Multilingual)',
-    description: 'Balanced, supports 99 languages (~240MB)',
+    name: 'Whisper 240MB (Multilingual)',
+    description: 'Balanced, supports 99 languages',
   },
   {
     id: 'custom',
@@ -138,14 +138,22 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
             <SelectValue placeholder="Select a model" />
           </SelectTrigger>
           <SelectContent>
-            {PRESET_MODELS.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                <div className="flex flex-col items-start">
-                  <span className="font-medium">{model.name}</span>
-                  <span className="text-xs text-muted-foreground">{model.description}</span>
-                </div>
-              </SelectItem>
-            ))}
+            {PRESET_MODELS.map((model) => {
+              const nameMatch = model.name.match(/^(.*?)(\s*\(([^)]+)\))$/);
+              const baseName = nameMatch ? nameMatch[1].trim() : model.name;
+              const tag = nameMatch ? nameMatch[3] : '';
+              return (
+                <SelectItem key={model.id} value={model.id}>
+                  <div className="flex flex-col items-start">
+                    <span className="font-medium">
+                      {baseName}
+                      {tag && <span className="font-bold text-foreground"> ({tag})</span>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{model.description}</span>
+                  </div>
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
       </div>
