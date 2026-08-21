@@ -94,6 +94,8 @@ const Index = () => {
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
+  const filesProcessedSinceResetRef = useRef(0);
+
 
   const processNextInQueue = useCallback(async () => {
     if (isProcessingRef.current || fileQueueRef.current.length === 0) {
