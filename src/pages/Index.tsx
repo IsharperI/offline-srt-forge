@@ -337,6 +337,37 @@ const Index = () => {
                   disabled={isProcessing || reviewFiles.length > 0}
                 />
 
+                {/* Language Selection */}
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="languageSelect" className="text-sm font-medium text-foreground whitespace-nowrap">
+                    Language:
+                  </Label>
+                  <Select
+                    value={selectedLanguage || 'auto'}
+                    onValueChange={(value) => setSelectedLanguage(value === 'auto' ? null : value)}
+                    disabled={isProcessing || reviewFiles.length > 0}
+                  >
+                    <SelectTrigger id="languageSelect" className="w-64">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto-detect</SelectItem>
+                      <SelectItem value="english">English</SelectItem>
+                      <SelectItem value="portuguese">Portuguese</SelectItem>
+                      <SelectItem value="spanish">Spanish</SelectItem>
+                      <SelectItem value="french">French</SelectItem>
+                      <SelectItem value="german">German</SelectItem>
+                      <SelectItem value="italian">Italian</SelectItem>
+                      <SelectItem value="japanese">Japanese</SelectItem>
+                      <SelectItem value="chinese">Chinese</SelectItem>
+                      <SelectItem value="korean">Korean</SelectItem>
+                      <SelectItem value="russian">Russian</SelectItem>
+                      <SelectItem value="arabic">Arabic</SelectItem>
+                      <SelectItem value="hindi">Hindi</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Character Limit Setting */}
                 <div className="flex items-center gap-4">
                   <Label htmlFor="charLimit" className="text-sm font-medium text-foreground whitespace-nowrap">
