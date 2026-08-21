@@ -90,10 +90,14 @@ export function getCurrentModelId(): string | null {
   return currentModelId;
 }
 
-export function resetTranscriber(): void {
+export async function resetTranscriber(): Promise<void> {
+  if (transcriber && typeof transcriber.dispose === 'function') {
+    await transcriber.dispose();
+  }
   transcriber = null;
   currentModelId = null;
 }
+
 
 function estimateWordTimings(text: string, startTime: number, endTime: number): WordTiming[] {
   const words = text.split(/\s+/).filter(w => w.length > 0);

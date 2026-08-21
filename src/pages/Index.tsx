@@ -193,7 +193,7 @@ const Index = () => {
     // memory-accumulation issues in Transformers.js / ONNX Runtime.
     filesProcessedSinceResetRef.current += 1;
     if (filesProcessedSinceResetRef.current >= 3) {
-      resetTranscriber();
+      await resetTranscriber();
       filesProcessedSinceResetRef.current = 0;
     }
 
@@ -205,6 +205,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
+
   }, [selectedModel, customCorrections, scriptText, selectedLanguage]);
 
 
