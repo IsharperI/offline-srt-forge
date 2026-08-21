@@ -94,6 +94,8 @@ const Index = () => {
   // Queue for sequential processing
   const fileQueueRef = useRef<QueuedFile[]>([]);
   const isProcessingRef = useRef(false);
+  const filesProcessedSinceResetRef = useRef(0);
+
 
   const processNextInQueue = useCallback(async () => {
     if (isProcessingRef.current || fileQueueRef.current.length === 0) {
@@ -187,6 +189,14 @@ const Index = () => {
       );
     }
 
+    // Increment per-file counter and reset the model every 3 files to work around
+    // memory-accumulation issues in Transformers.js / ONNX Runtime.
+    filesProcessedSinceResetRef.current += 1;
+    if (filesProcessedSinceResetRef.current >= 3) {
+      resetTranscriber();
+      filesProcessedSinceResetRef.current = 0;
+    }
+
     // Remove from queue and process next
     fileQueueRef.current = fileQueueRef.current.slice(1);
     isProcessingRef.current = false;
@@ -196,6 +206,7 @@ const Index = () => {
       processNextInQueue();
     }
   }, [selectedModel, customCorrections, scriptText, selectedLanguage]);
+
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
