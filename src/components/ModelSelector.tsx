@@ -138,14 +138,22 @@ export function ModelSelector({ selectedModel, onModelChange, disabled }: ModelS
             <SelectValue placeholder="Select a model" />
           </SelectTrigger>
           <SelectContent>
-            {PRESET_MODELS.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                <div className="flex flex-col items-start">
-                  <span className="font-medium">{model.name}</span>
-                  <span className="text-xs text-muted-foreground">{model.description}</span>
-                </div>
-              </SelectItem>
-            ))}
+            {PRESET_MODELS.map((model) => {
+              const nameMatch = model.name.match(/^(.*?)(\s*\(([^)]+)\))$/);
+              const baseName = nameMatch ? nameMatch[1].trim() : model.name;
+              const tag = nameMatch ? nameMatch[3] : '';
+              return (
+                <SelectItem key={model.id} value={model.id}>
+                  <div className="flex flex-col items-start">
+                    <span className="font-medium">
+                      {baseName}
+                      {tag && <span className="font-bold text-foreground"> ({tag})</span>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{model.description}</span>
+                  </div>
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
       </div>
