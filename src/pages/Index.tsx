@@ -13,6 +13,13 @@ import { alignTranscriptionToScript, AlignmentResult } from '@/lib/scriptAlignme
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   transcribeAudio,
   sanitizeSegments,
   generateSRT,
@@ -62,6 +69,7 @@ const Index = () => {
   const [completedFiles, setCompletedFiles] = useState<ProcessedFileData[]>([]);
   const [maxCharLimit, setMaxCharLimit] = useState(80);
   const [selectedModel, setSelectedModel] = useState(PRESET_MODELS[0].id);
+  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [customCorrections, setCustomCorrections] = useState<Record<string, string>>({});
   const [scriptText, setScriptText] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(true);
@@ -115,8 +123,8 @@ const Index = () => {
         );
       };
 
-      // Step A: Raw transcription (pass selected model)
-      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration);
+      // Step A: Raw transcription (pass selected model and language)
+      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration, selectedLanguage);
 
       // Step B: Sanitization
       let sanitizedSegments = sanitizeSegments(rawSegments);
@@ -187,7 +195,7 @@ const Index = () => {
     if (fileQueueRef.current.length > 0) {
       processNextInQueue();
     }
-  }, [selectedModel, customCorrections, scriptText]);
+  }, [selectedModel, customCorrections, scriptText, selectedLanguage]);
 
   const handleFilesSelected = useCallback((files: File[]) => {
     // Add all files to the queue and processing list
@@ -328,6 +336,37 @@ const Index = () => {
                   onModelChange={setSelectedModel}
                   disabled={isProcessing || reviewFiles.length > 0}
                 />
+
+                {/* Language Selection */}
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="languageSelect" className="text-sm font-medium text-foreground whitespace-nowrap">
+                    Language:
+                  </Label>
+                  <Select
+                    value={selectedLanguage || 'auto'}
+                    onValueChange={(value) => setSelectedLanguage(value === 'auto' ? null : value)}
+                    disabled={isProcessing || reviewFiles.length > 0}
+                  >
+                    <SelectTrigger id="languageSelect" className="w-64">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto-detect</SelectItem>
+                      <SelectItem value="english">English</SelectItem>
+                      <SelectItem value="portuguese">Portuguese</SelectItem>
+                      <SelectItem value="spanish">Spanish</SelectItem>
+                      <SelectItem value="french">French</SelectItem>
+                      <SelectItem value="german">German</SelectItem>
+                      <SelectItem value="italian">Italian</SelectItem>
+                      <SelectItem value="japanese">Japanese</SelectItem>
+                      <SelectItem value="chinese">Chinese</SelectItem>
+                      <SelectItem value="korean">Korean</SelectItem>
+                      <SelectItem value="russian">Russian</SelectItem>
+                      <SelectItem value="arabic">Arabic</SelectItem>
+                      <SelectItem value="hindi">Hindi</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 {/* Character Limit Setting */}
                 <div className="flex items-center gap-4">
