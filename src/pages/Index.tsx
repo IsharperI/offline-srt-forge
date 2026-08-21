@@ -123,8 +123,8 @@ const Index = () => {
         );
       };
 
-      // Step A: Raw transcription (pass selected model)
-      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration);
+      // Step A: Raw transcription (pass selected model and language)
+      const rawSegments = await transcribeAudio(file, updateProgress, selectedModel, duration, selectedLanguage);
 
       // Step B: Sanitization
       let sanitizedSegments = sanitizeSegments(rawSegments);
