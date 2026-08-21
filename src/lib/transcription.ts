@@ -232,12 +232,21 @@ export async function transcribeAudio(
   try {
     onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
     
+    const isEnglishOnly = targetModel.toLowerCase().endsWith('.en');
+    const callOptions: Record<string, unknown> = {
+      return_timestamps: true,
+      chunk_length_s: 30,
+      stride_length_s: 3,
+    };
+    if (!isEnglishOnly) {
+      callOptions.task = 'transcribe';
+      if (sourceLanguage) {
+        callOptions.language = sourceLanguage;
+      }
+    }
+
     const result = await withTimeout(
-      transcriber!(audioUrl, {
-        return_timestamps: true,
-        chunk_length_s: 30,
-        stride_length_s: 3,
-      }) as Promise<AutomaticSpeechRecognitionOutput>,
+      transcriber!(audioUrl, callOptions) as Promise<AutomaticSpeechRecognitionOutput>,
       TRANSCRIPTION_TIMEOUT_MS,
       audioFile.name
     );
