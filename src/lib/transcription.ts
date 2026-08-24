@@ -192,6 +192,25 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+const WINDOW_SECONDS = 25;
+
+function sliceAudioBuffer(buffer: AudioBuffer, startSec: number, endSec: number): AudioBuffer {
+  const sampleRate = buffer.sampleRate;
+  const startSample = Math.max(0, Math.floor(startSec * sampleRate));
+  const endSample = Math.min(buffer.length, Math.ceil(endSec * sampleRate));
+  const length = Math.max(1, endSample - startSample);
+  const offline = new OfflineAudioContext(buffer.numberOfChannels, length, sampleRate);
+  const out = offline.createBuffer(buffer.numberOfChannels, length, sampleRate);
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const input = buffer.getChannelData(channel);
+    const output = out.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      output[i] = input[startSample + i] ?? 0;
+    }
+  }
+  return out;
+}
+
 export async function transcribeAudio(
   audioFile: File,
   onProgress?: (progress: TranscriptionProgress) => void,
@@ -231,16 +250,26 @@ export async function transcribeAudio(
     processedBlob = new Blob([arrayBuffer], { type: audioFile.type || 'audio/wav' });
   }
   
-  const audioUrl = URL.createObjectURL(processedBlob);
+  // Decode the processed audio so we can cut it into fixed windows ourselves.
+  let decoded: AudioBuffer;
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const decodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    try {
+      decoded = await decodeCtx.decodeAudioData(await processedBlob.arrayBuffer());
+    } finally {
+      await decodeCtx.close();
+    }
+  }
+  
+  const totalDuration = decoded.duration || audioDuration || 0;
+  const windowCount = Math.max(1, Math.ceil(totalDuration / WINDOW_SECONDS));
+  const createdUrls: string[] = [];
   
   try {
-    onProgress?.({ status: 'transcribing', progress: 10, message: 'Transcribing audio...' });
-    
     const isEnglishOnly = targetModel.toLowerCase().endsWith('.en');
     const callOptions: Record<string, unknown> = {
       return_timestamps: true,
-      chunk_length_s: 30,
-      stride_length_s: 5,
     };
     if (!isEnglishOnly) {
       callOptions.task = 'transcribe';
@@ -251,40 +280,55 @@ export async function transcribeAudio(
       }
     }
 
-    const result = await withTimeout(
-      transcriber!(audioUrl, callOptions) as Promise<AutomaticSpeechRecognitionOutput>,
-      TRANSCRIPTION_TIMEOUT_MS,
-      audioFile.name
-    );
-    
-    console.log('Transcription result:', result);
-    
-    onProgress?.({ status: 'processing', progress: 80, message: 'Processing transcription...' });
-    
     const segments: TranscriptSegment[] = [];
-    
-    if (result.chunks && Array.isArray(result.chunks)) {
-      for (const chunk of result.chunks) {
-        if (chunk.timestamp && Array.isArray(chunk.timestamp)) {
+
+    for (let windowIndex = 0; windowIndex < windowCount; windowIndex++) {
+      const offset = windowIndex * WINDOW_SECONDS;
+      const windowEnd = Math.min(totalDuration, offset + WINDOW_SECONDS);
+      if (windowEnd <= offset) break;
+
+      onProgress?.({
+        status: 'transcribing',
+        progress: 10 + Math.round((windowIndex / windowCount) * 70),
+        message: `Transcribing ${windowIndex + 1} of ${windowCount}...`,
+      });
+
+      const windowBlob = encodeWAV(sliceAudioBuffer(decoded, offset, windowEnd));
+      const windowUrl = URL.createObjectURL(windowBlob);
+      createdUrls.push(windowUrl);
+
+      const result = await withTimeout(
+        transcriber!(windowUrl, callOptions) as Promise<AutomaticSpeechRecognitionOutput>,
+        TRANSCRIPTION_TIMEOUT_MS,
+        `${audioFile.name} (window ${windowIndex + 1})`
+      );
+
+      const windowLength = windowEnd - offset;
+
+      if (result.chunks && Array.isArray(result.chunks)) {
+        for (let i = 0; i < result.chunks.length; i++) {
+          const chunk = result.chunks[i];
+          if (!chunk.timestamp || !Array.isArray(chunk.timestamp)) continue;
           const [start, end] = chunk.timestamp;
           const text = (chunk.text || '').replace(/<\|[\d.]+\|>/g, '').trim();
-          if (text) {
-            const startTime = typeof start === 'number' ? start : 0;
-            const chunkIndex = result.chunks.indexOf(chunk);
-            const nextChunk = result.chunks[chunkIndex + 1];
-            const endTime = typeof end === 'number'
-              ? end
-              : (typeof nextChunk?.timestamp?.[0] === 'number'
-                ? nextChunk.timestamp[0]
-                : (typeof audioDuration === 'number' ? audioDuration : startTime + 2));
-            const words = estimateWordTimings(text, startTime, endTime);
-            segments.push({ startTime, endTime, text, words });
-          }
+          if (!text) continue;
+          const localStart = typeof start === 'number' ? start : 0;
+          const nextChunk = result.chunks[i + 1];
+          const localEnd = typeof end === 'number'
+            ? end
+            : (typeof nextChunk?.timestamp?.[0] === 'number'
+              ? nextChunk.timestamp[0]
+              : Math.min(windowLength, localStart + 2));
+          const startTime = offset + localStart;
+          const endTime = offset + Math.max(localEnd, localStart + 0.1);
+          const words = estimateWordTimings(text, startTime, endTime);
+          segments.push({ startTime, endTime, text, words });
         }
+      } else if (result.text && result.text.trim()) {
+        const text = result.text.trim();
+        const words = estimateWordTimings(text, offset, windowEnd);
+        segments.push({ startTime: offset, endTime: windowEnd, text, words });
       }
-    } else if (result.text) {
-      const words = estimateWordTimings(result.text.trim(), 0, 30);
-      segments.push({ startTime: 0, endTime: 30, text: result.text.trim(), words });
     }
     
     if (segments.length === 0) {
@@ -297,9 +341,10 @@ export async function transcribeAudio(
     console.error('Transcription error details:', error);
     throw error;
   } finally {
-    URL.revokeObjectURL(audioUrl);
+    createdUrls.forEach(url => URL.revokeObjectURL(url));
   }
 }
+
 
 // Step B: Sanitization Layer
 export function sanitizeSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
