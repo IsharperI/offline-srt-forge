@@ -240,7 +240,7 @@ export async function transcribeAudio(
     const callOptions: Record<string, unknown> = {
       return_timestamps: true,
       chunk_length_s: 30,
-      stride_length_s: 3,
+      stride_length_s: 5,
     };
     if (!isEnglishOnly) {
       callOptions.task = 'transcribe';
