@@ -283,15 +283,9 @@ export async function transcribeAudio(
     const segments: TranscriptSegment[] = [];
 
     for (let windowIndex = 0; windowIndex < windowCount; windowIndex++) {
-      const trueStart = windowIndex * WINDOW_SECONDS;
-      const trueEnd = Math.min(totalDuration, trueStart + WINDOW_SECONDS);
-      if (trueEnd <= trueStart) break;
-      const trueLength = trueEnd - trueStart;
-
-      // Pad by 1.5s on each side for acoustic context, clamped to file bounds.
-      const padStart = Math.max(0, trueStart - 1.5);
-      const padEnd = Math.min(totalDuration, trueEnd + 1.5);
-      const padOffset = trueStart - padStart;
+      const offset = windowIndex * WINDOW_SECONDS;
+      const windowEnd = Math.min(totalDuration, offset + WINDOW_SECONDS);
+      if (windowEnd <= offset) break;
 
       onProgress?.({
         status: 'transcribing',
@@ -299,7 +293,7 @@ export async function transcribeAudio(
         message: `Transcribing ${windowIndex + 1} of ${windowCount}...`,
       });
 
-      const windowBlob = encodeWAV(sliceAudioBuffer(decoded, padStart, padEnd));
+      const windowBlob = encodeWAV(sliceAudioBuffer(decoded, offset, windowEnd));
       const windowUrl = URL.createObjectURL(windowBlob);
       createdUrls.push(windowUrl);
 
@@ -309,6 +303,8 @@ export async function transcribeAudio(
         `${audioFile.name} (window ${windowIndex + 1})`
       );
 
+      const windowLength = windowEnd - offset;
+
       if (result.chunks && Array.isArray(result.chunks)) {
         for (let i = 0; i < result.chunks.length; i++) {
           const chunk = result.chunks[i];
@@ -316,26 +312,22 @@ export async function transcribeAudio(
           const [start, end] = chunk.timestamp;
           const text = (chunk.text || '').replace(/<\|[\d.]+\|>/g, '').trim();
           if (!text) continue;
-          const sliceStart = typeof start === 'number' ? start : 0;
+          const localStart = typeof start === 'number' ? start : 0;
           const nextChunk = result.chunks[i + 1];
-          const sliceEnd = typeof end === 'number'
+          const localEnd = typeof end === 'number'
             ? end
             : (typeof nextChunk?.timestamp?.[0] === 'number'
               ? nextChunk.timestamp[0]
-              : Math.min(padEnd - padStart, sliceStart + 2));
-
-          // Keep only segments that fall inside the original (non-padded) window.
-          if (sliceStart < 1.5 || sliceEnd > trueLength + 1.5) continue;
-
-          const startTime = trueStart + (sliceStart - 1.5);
-          const endTime = trueStart + Math.max(sliceEnd - 1.5, sliceStart - 1.5 + 0.1);
+              : Math.min(windowLength, localStart + 2));
+          const startTime = offset + localStart;
+          const endTime = offset + Math.max(localEnd, localStart + 0.1);
           const words = estimateWordTimings(text, startTime, endTime);
           segments.push({ startTime, endTime, text, words });
         }
       } else if (result.text && result.text.trim()) {
         const text = result.text.trim();
-        const words = estimateWordTimings(text, trueStart, trueEnd);
-        segments.push({ startTime: trueStart, endTime: trueEnd, text, words });
+        const words = estimateWordTimings(text, offset, windowEnd);
+        segments.push({ startTime: offset, endTime: windowEnd, text, words });
       }
     }
     
