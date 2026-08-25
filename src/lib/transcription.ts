@@ -325,10 +325,10 @@ export async function transcribeAudio(
               : Math.min(padEnd - padStart, sliceStart + 2));
 
           // Keep only segments that fall inside the original (non-padded) window.
-          if (sliceStart < 1.5 || sliceEnd > trueLength + 1.5) continue;
+          if (sliceStart < padOffset || sliceEnd > trueLength + padOffset) continue;
 
-          const startTime = trueStart + (sliceStart - 1.5);
-          const endTime = trueStart + Math.max(sliceEnd - 1.5, sliceStart - 1.5 + 0.1);
+          const startTime = trueStart + (sliceStart - padOffset);
+          const endTime = trueStart + Math.max(sliceEnd - padOffset, sliceStart - padOffset + 0.1);
           const words = estimateWordTimings(text, startTime, endTime);
           segments.push({ startTime, endTime, text, words });
         }
