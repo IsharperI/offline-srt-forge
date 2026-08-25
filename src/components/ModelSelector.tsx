@@ -63,6 +63,11 @@ export const PRESET_MODELS: ModelOption[] = [
     description: 'Balanced, supports 99 languages',
   },
   {
+    id: 'onnx-community/whisper-large-v3-turbo',
+    name: 'Whisper 1.5GB (Multilingual)',
+    description: 'Best accuracy, supports 99 languages',
+  },
+  {
     id: 'custom',
     name: 'Custom Model',
     description: 'Use a custom Hugging Face model',
