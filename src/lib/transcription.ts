@@ -193,6 +193,48 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
 }
 
 const WINDOW_SECONDS = 25;
+const WINDOW_PADDING_SECONDS = 4;
+
+function normalizeForDedupe(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function areSimilarText(a: string, b: string): boolean {
+  const normalizedA = normalizeForDedupe(a);
+  const normalizedB = normalizeForDedupe(b);
+  if (!normalizedA || !normalizedB) return false;
+  if (normalizedA === normalizedB) return true;
+  if (normalizedA.length > 10 && normalizedB.length > 10 && (normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA))) {
+    return true;
+  }
+
+  const wordsA = new Set(normalizedA.split(' ').filter(Boolean));
+  const wordsB = new Set(normalizedB.split(' ').filter(Boolean));
+  if (wordsA.size === 0 || wordsB.size === 0) return false;
+
+  let shared = 0;
+  wordsA.forEach(word => {
+    if (wordsB.has(word)) shared += 1;
+  });
+
+  return shared / Math.max(wordsA.size, wordsB.size) >= 0.8;
+}
+
+function isDuplicateBoundarySegment(candidate: TranscriptSegment, keptSegments: TranscriptSegment[]): boolean {
+  const candidateMidpoint = (candidate.startTime + candidate.endTime) / 2;
+  const candidateDuration = Math.max(0.1, candidate.endTime - candidate.startTime);
+
+  return keptSegments.some(existing => {
+    const existingMidpoint = (existing.startTime + existing.endTime) / 2;
+    const existingDuration = Math.max(0.1, existing.endTime - existing.startTime);
+    const overlap = Math.max(0, Math.min(candidate.endTime, existing.endTime) - Math.max(candidate.startTime, existing.startTime));
+    const timeIsSimilar = Math.abs(candidateMidpoint - existingMidpoint) <= 2.5
+      || Math.abs(candidate.startTime - existing.startTime) <= 2
+      || overlap / Math.min(candidateDuration, existingDuration) >= 0.5;
+
+    return timeIsSimilar && areSimilarText(candidate.text, existing.text);
+  });
+}
 
 function sliceAudioBuffer(buffer: AudioBuffer, startSec: number, endSec: number): AudioBuffer {
   const sampleRate = buffer.sampleRate;
@@ -286,6 +328,8 @@ export async function transcribeAudio(
       const offset = windowIndex * WINDOW_SECONDS;
       const windowEnd = Math.min(totalDuration, offset + WINDOW_SECONDS);
       if (windowEnd <= offset) break;
+      const paddedStart = Math.max(0, offset - WINDOW_PADDING_SECONDS);
+      const paddedEnd = Math.min(totalDuration, windowEnd + WINDOW_PADDING_SECONDS);
 
       onProgress?.({
         status: 'transcribing',
@@ -293,7 +337,7 @@ export async function transcribeAudio(
         message: `Transcribing ${windowIndex + 1} of ${windowCount}...`,
       });
 
-      const windowBlob = encodeWAV(sliceAudioBuffer(decoded, offset, windowEnd));
+      const windowBlob = encodeWAV(sliceAudioBuffer(decoded, paddedStart, paddedEnd));
       const windowUrl = URL.createObjectURL(windowBlob);
       createdUrls.push(windowUrl);
 
@@ -303,7 +347,7 @@ export async function transcribeAudio(
         `${audioFile.name} (window ${windowIndex + 1})`
       );
 
-      const windowLength = windowEnd - offset;
+      const windowLength = paddedEnd - paddedStart;
 
       if (result.chunks && Array.isArray(result.chunks)) {
         for (let i = 0; i < result.chunks.length; i++) {
@@ -319,10 +363,15 @@ export async function transcribeAudio(
             : (typeof nextChunk?.timestamp?.[0] === 'number'
               ? nextChunk.timestamp[0]
               : Math.min(windowLength, localStart + 2));
-          const startTime = offset + localStart;
-          const endTime = offset + Math.max(localEnd, localStart + 0.1);
+          const startTime = paddedStart + localStart;
+          const endTime = paddedStart + Math.max(localEnd, localStart + 0.1);
+          const midpoint = (startTime + endTime) / 2;
+          const midpointInTrueWindow = midpoint >= offset && (windowIndex === windowCount - 1 ? midpoint <= windowEnd : midpoint < windowEnd);
+          if (!midpointInTrueWindow) continue;
           const words = estimateWordTimings(text, startTime, endTime);
-          segments.push({ startTime, endTime, text, words });
+          const segment = { startTime, endTime, text, words };
+          if (isDuplicateBoundarySegment(segment, segments)) continue;
+          segments.push(segment);
         }
       } else if (result.text && result.text.trim()) {
         const text = result.text.trim();
