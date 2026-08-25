@@ -1,102 +1,39 @@
+# Why the timings differ — and how to fix it
 
-# Fix: Queue Hang Prevention for Large File Batches
+## What the two files show
 
-## What's Going Wrong
+Comparing your manual VTT to the app's SRT, the differences are not random model drift. They cluster at two exact points:
 
-There are two interlocking bugs that cause files to get stuck in "Queued..." when more than ~10 files are uploaded.
+| Time | Manual VTT | App SRT |
+|---|---|---|
+| ~24.5–31.2s | "grandes diferenças de temperatura entre as condições ambientais e criogênicas" | "…relacionada à tubulação **entre** / as condições ambientais e criogênicas" — the phrase "grandes diferenças de temperatura" is missing |
+| ~47.3–50.2s | "Dispositivos de alívio de pressão / devem ser instalados na tubulação em todos os pontos onde o hidrogênio líquido possa ficar retido." | caption 10 is "criogênicas. líquido possa ficar retido." spanning 46.1 → 58.3 (12.2s) |
 
-### Bug 1: Silent bail in `initializeTranscriber`
+25s and 50s are exactly the app's internal window boundaries. That is the cause, not the model.
 
-Inside `initializeTranscriber` (in `transcription.ts`), there is a guard at the top:
+## Root cause
 
-```
-if (isLoading) return;
-```
+The transcriber cuts the audio into fixed 25-second windows, transcribes each with 1.5s of padding on both sides for context, then keeps only the segments that fall fully inside the un-padded 25s window.
 
-This returns `undefined` — a completely silent no-op. When a queued file starts processing while the model is already loading for the previous file, `transcribeAudio` calls `initializeTranscriber`, which returns immediately leaving `transcriber` as `null`. The code then hits the null-check right after and throws `'Failed to initialize transcription model'`. This error bubbles to the `catch` block in `processNextInQueue`, which correctly marks the file as errored and releases `isProcessingRef`... but this means files 2–N in a large batch can error out instantly rather than waiting for the model to finish loading.
+A phrase that *straddles* a boundary gets rejected twice:
+- In window N it is discarded because its end time falls past the window end.
+- In window N+1 it is discarded because its start time falls before the window start.
 
-The fix: replace `if (isLoading) return;` with a **wait-and-share** mechanism using a `Promise` that all callers can `await`. If loading is already in progress, any subsequent caller simply awaits the same in-flight promise instead of bailing out.
+So the words spoken across the 25s and 50s marks vanish. The 12.2-second caption 10 is a downstream symptom: with the middle text gone, the remaining fragments get bridged across the resulting silence gap.
 
-### Bug 2: No timeout watchdog
+A second, smaller source of drift: word-level times are *estimated* by splitting each Whisper segment proportionally to character count. So when a caption is re-split to fit the character limit, the split time is interpolated rather than measured — this is why boundaries like 5.547 vs 7.107 differ by a second or two even where the text matches.
 
-The transcription of a single file (`transcriber!(audioUrl, ...)`) is a raw `await` with no timeout. If the WebAssembly model hangs on a malformed audio file, all subsequent queued files are frozen indefinitely because `isProcessingRef.current` is never set back to `false`.
+## Fix
 
-The fix: wrap the `transcriber` call in a `Promise.race` with a configurable timeout (default: 3 minutes). If it times out, a descriptive error is thrown, the catch block handles it normally, and the queue advances to the next file.
+1. Replace the "drop anything crossing the edge" rule with a claim-by-midpoint rule: a segment belongs to the window whose range contains the segment's midpoint. Boundary-crossing speech is then kept exactly once, with its real (padded-slice) timings, instead of being dropped by both windows.
+2. Add a de-duplication pass after all windows are merged: if two consecutive segments overlap in time and share the same leading/trailing text, keep the longer/earlier one. This guards against the same phrase being emitted by both windows when a midpoint lands near the edge.
+3. Only bridge a silence gap onto the previous caption when the gap is short (e.g. under 2s). Longer gaps stay as real gaps, so a missing chunk can never inflate a caption to 12 seconds.
 
-## Changes — Two files only
+## Technical notes
 
-### `src/lib/transcription.ts`
+All changes are in `src/lib/transcription.ts`:
+- `transcribeAudio` — the window loop's keep/discard condition (currently `if (sliceStart < padOffset || sliceEnd > trueLength + padOffset) continue;`) becomes a midpoint test against the window range.
+- New helper after the window loop to drop overlapping duplicate segments.
+- `sanitizeSegments` — the silence gap-filling branch gets a maximum bridge duration.
 
-**1. Replace the `isLoading` boolean guard with a shared promise:**
-
-```ts
-// Before (broken):
-let isLoading = false;
-// ...
-if (isLoading) return;  // <-- silent bail
-isLoading = true;
-
-// After (fixed):
-let loadingPromise: Promise<void> | null = null;
-// ...
-if (loadingPromise) return loadingPromise;  // <-- await the same promise
-loadingPromise = (async () => { ... })().finally(() => { loadingPromise = null; });
-return loadingPromise;
-```
-
-Every caller — no matter how many files are in the queue — will now `await` the single shared loading promise rather than getting a silent no-op.
-
-**2. Add a per-file transcription timeout:**
-
-A `withTimeout` helper wraps the model call:
-
-```ts
-const TRANSCRIPTION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s: ${label}`)), ms)
-    )
-  ]);
-}
-```
-
-The `transcriber!(audioUrl, { ... })` call is wrapped:
-
-```ts
-const result = await withTimeout(
-  transcriber!(audioUrl, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5 }),
-  TRANSCRIPTION_TIMEOUT_MS,
-  audioFile.name
-);
-```
-
-**3. Add a timeout error message to `Index.tsx`:**
-
-In `processNextInQueue`'s catch block, add a check for timeout errors so users see a clear message rather than a raw error string:
-
-```ts
-} else if (error.message.includes('Timed out')) {
-  errorMessage = 'Processing timed out — file may be too long or corrupted';
-}
-```
-
-### `src/pages/Index.tsx`
-
-Only the error message handler in `processNextInQueue` is updated — one extra `else if` branch for timeout detection. No structural changes.
-
-## What stays the same
-
-- Sequential processing order (one file at a time) is preserved.
-- The queue data structure (`fileQueueRef`, `isProcessingRef`) is unchanged.
-- All existing error handling paths are unchanged.
-- No new dependencies.
-- No UI changes beyond the new timeout error message string.
-
-## Outcome
-
-- With 10+ files: files 2–N now correctly wait for the model to finish loading before attempting transcription, instead of erroring or hanging.
-- If any single file hangs the model for more than 3 minutes, it is automatically marked as an error and the queue advances.
-- The "Queued..." status resolves correctly for every file in the batch.
+No changes to models, settings, or UI. Word timings stay character-estimated; sub-second split drift will remain until real word-level timestamps are enabled, which is a separate change.
